@@ -1,4 +1,9 @@
-name: Deploy to milkky.flutterbot.co.uk
+name: Deploy
+
+# Every push to main (touching the game) -> new release folder, staging points at it.
+# The "production" job then waits for approval; approving it points production
+# at the exact same release. To roll back, open an older run and re-run its
+# "Promote to production" job.
 
 on:
   push:
@@ -8,13 +13,17 @@ on:
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
-concurrency:
-  group: deploy
-  cancel-in-progress: true
+env:
+  BASE: /var/www/milkky
+  RELEASE: ${{ github.sha }}
 
 jobs:
-  deploy:
+  staging:
+    name: Deploy to staging
     runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://milkky-staging.flutterbot.co.uk
     steps:
       - uses: actions/checkout@v4
 
@@ -24,8 +33,42 @@ jobs:
           echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "TARGET=${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" >> "$GITHUB_ENV"
 
-      - name: Upload game files
+      - name: Upload release
         run: |
-          rsync -avz --delete src/ \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/var/www/milkky/"
+          echo "$RELEASE" > src/version.txt
+          ssh "$TARGET" "mkdir -p $BASE/releases/$RELEASE"
+          rsync -az --delete src/ "$TARGET:$BASE/releases/$RELEASE/"
+
+      - name: Point staging at this release
+        run: |
+          ssh "$TARGET" "cd $BASE && ln -sfn releases/$RELEASE staging.tmp && mv -Tf staging.tmp staging"
+
+      - name: Prune old releases (keep 10 + whatever is live)
+        run: |
+          ssh "$TARGET" 'cd '"$BASE"'/releases &&
+            keep=" $(basename "$(readlink ../staging)" 2>/dev/null) $(basename "$(readlink ../production)" 2>/dev/null) "
+            ls -1t | tail -n +11 | while read -r d; do
+              case "$keep" in *" $d "*) ;; *) rm -rf -- "$d" ;; esac
+            done'
+
+  production:
+    name: Promote to production
+    needs: staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://milkky.flutterbot.co.uk
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "TARGET=${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" >> "$GITHUB_ENV"
+
+      - name: Point production at this release
+        run: |
+          ssh "$TARGET" "cd $BASE && test -d releases/$RELEASE && ln -sfn releases/$RELEASE production.tmp && mv -Tf production.tmp production"
