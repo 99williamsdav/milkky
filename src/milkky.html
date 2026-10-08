@@ -159,6 +159,14 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 .fixtures .fx button{font-size:13px;padding:5px 12px}
 .fixtures .fx small{color:var(--muted)}
 #hubLiveWrap[hidden],#hubDoneWrap[hidden]{display:none}
+#lbPace{margin-bottom:6px}
+#lbPaceNote{margin:0 0 16px}
+#mineList .fx{align-items:center}
+#mineList .what{display:flex;flex-direction:column;gap:2px;min-width:0}
+#mineList .what b{font-weight:700}
+#mineList .status{font-size:13px;color:var(--muted)}
+#mineList .status.go{color:var(--blue);font-weight:700}
+#mineList:empty::before{content:"No games yet. Start one with Play online.";color:var(--muted);font-size:14px;padding:6px 0}
 .lgtable td small{color:var(--muted);font-weight:400}
 @media (prefers-reduced-motion: reduce){ .chip,#toast{transition:none} }
 </style>
@@ -197,7 +205,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <button data-n="1">1</button><button data-n="2" aria-pressed="true">2</button><button data-n="3">3</button><button data-n="4">4</button>
       </div>
       <div id="slots"></div>
-      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="onlineBtn">Play online</button><button id="setupRules">Rules</button></div>
+      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="setupRules">Rules</button></div>
     </div>
   </div>
 
@@ -253,6 +261,9 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div style="font-weight:600">Game</div>
       <div class="count" id="lbMode"><button data-mode="game">Single game</button><button data-mode="league">League</button></div>
       <p class="note" id="lbModeNote"></p>
+      <div style="font-weight:600">Pace</div>
+      <div class="count" id="lbPace"><button data-pace="live">Live</button><button data-pace="async">Take your time</button></div>
+      <p class="note" id="lbPaceNote"></p>
       <div style="font-weight:600">Play to</div>
       <div class="count" id="lbTarget"><button data-t="20">20</button><button data-t="30">30</button><button data-t="50">50</button></div>
       <div style="font-weight:600;margin-bottom:6px">Players</div>
@@ -260,6 +271,18 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div class="row" id="lbAdd"><span>Add computer:</span><button data-level="easy">Easy</button><button data-level="medium">Medium</button><button data-level="hard">Hard</button></div>
       <p id="lbWait"></p>
       <div class="row"><button class="primary" id="lbStart">Start game</button><button id="lbLeave">Leave room</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="mine" hidden>
+    <div class="card wide">
+      <h2>My games</h2>
+      <p class="sub" id="mineSub"></p>
+      <div class="fixtures" id="mineList"></div>
+      <div class="sectionlabel">On another device</div>
+      <p class="note">Open your personal link there to see these games. Keep it to yourself: anyone with it can play as you.</p>
+      <div class="linkrow"><code id="mineLink"></code><button id="mineCopy">Copy link</button></div>
+      <div class="row"><button class="primary" id="mineNew">New online game</button><button id="mineBack">Back</button></div>
     </div>
   </div>
 

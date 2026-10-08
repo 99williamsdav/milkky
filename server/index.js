@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import RAPIER_MOD from '@dimforge/rapier3d-compat';
-import { Room } from './room.js';
+import { Room, hashKey } from './room.js';
 import * as store from './store.js';
 
 const RAPIER = RAPIER_MOD.default || RAPIER_MOD;
@@ -12,7 +12,8 @@ await RAPIER.init();
 const PORT = +process.env.PORT || 8080, HOST = process.env.HOST || '127.0.0.1';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O
 const MAX_ROOMS = 500;
-const EMPTY_ROOM_TTL = 2 * 60 * 1000; // close a room this long after the last person leaves
+const EMPTY_ROOM_TTL = 2 * 60 * 1000;            // live: close a room this long after the last person leaves
+const ASYNC_IDLE_TTL = 14 * 24 * 3600 * 1000;    // async: close a finished (or never started) room after two quiet weeks
 
 const rooms = new Map();
 function newCode() {
@@ -46,33 +47,43 @@ function enter(ws, room, seat) {
 // Give up a seat held elsewhere (`prev` = { code, token }), e.g. when someone follows a link to another room.
 function abandon(prev, ws) {
   const room = prev && findRoom(prev.code), seat = room && room.seats.find(s => s.token && s.token === prev.token);
-  if (!seat) return;
+  if (!seat || room.async) return; // async seats are kept: people can be in several of those at once
   if (seat.ws && seat.ws !== ws) { seat.ws.room = seat.ws.seat = null; seat.ws.close(4001, 'Joined another room'); }
   room.disconnect(seat, { left: true });
 }
 
 function onMessage(ws, m) {
+  // Your games across all rooms, for the "My games" screen
+  if (m.t === 'mine') {
+    const me = hashKey(m.me);
+    const games = me ? [...rooms.values()].map(r => r.summaryFor(me)).filter(Boolean) : [];
+    return send(ws, { t: 'mine', games });
+  }
   if (ws.room) {
-    if (m.t === 'leave') { const { room, seat } = ws; ws.room = ws.seat = null; return room.disconnect(seat, { left: true }); }
-    return ws.room.handle(ws.seat, m);
+    const { room, seat } = ws;
+    // leave: give up the seat (the computer plays it from now on). detach: just step away (async), keeping it.
+    if (m.t === 'leave' || m.t === 'detach') { ws.room = ws.seat = null; return room.disconnect(seat, { left: m.t === 'leave' }); }
+    return room.handle(seat, m);
   }
   switch (m.t) {
     case 'create': {
       if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'error', msg: 'The server is full, try again later' });
       const room = new Room(newCode(), RAPIER);
       rooms.set(room.code, room);
-      enter(ws, room, room.addHuman(ws, m.name));
+      enter(ws, room, room.addHuman(ws, m.name, m.me));
       return abandon(m.leave, ws);
     }
     case 'join': {
       const room = findRoom(m.code);
       if (!room) return send(ws, { t: 'error', msg: 'No room with that code' });
+      const mine = room.findSeat(null, m.me); // already in this room (e.g. followed its link again): back to that seat
+      if (mine) { room.reattach(mine, ws); return enter(ws, room, mine); }
       if (!room.canJoin()) return send(ws, { t: 'error', msg: room.phase === 'playing' ? 'That game has already started' : 'That room is full' });
-      enter(ws, room, room.addHuman(ws, m.name));
+      enter(ws, room, room.addHuman(ws, m.name, m.me));
       return abandon(m.leave, ws); // only once the new room has let us in
     }
     case 'rejoin': { // after a refresh or dropped connection
-      const room = findRoom(m.code), seat = room && room.seats.find(s => s.token && s.token === m.token);
+      const room = findRoom(m.code), seat = room && room.findSeat(m.token, m.me);
       if (!seat) return send(ws, { t: 'error', msg: 'That game has ended', code: 'gone' });
       room.reattach(seat, ws);
       return enter(ws, room, seat);
@@ -102,7 +113,8 @@ setInterval(() => {
   }
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (room.emptySince && now - room.emptySince > EMPTY_ROOM_TTL) { room.dispose(); rooms.delete(code); store.remove(code); }
+    const idle = room.async ? !room.inProgress && now - room.updatedAt > ASYNC_IDLE_TTL : room.emptySince && now - room.emptySince > EMPTY_ROOM_TTL;
+    if (idle) { room.dispose(); rooms.delete(code); store.remove(code); }
   }
 }, 30_000).unref();
 

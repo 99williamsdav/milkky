@@ -9,7 +9,7 @@ import { app, renderer, canvas, scene, camera } from './scene.js';
 import { decorateBottles, stickMesh, hand, aimGeo, aimLine, landRing } from './models.js';
 import { clearMilk, updateMilk } from './milk.js';
 import * as League from './league.js';
-import { createNet, savedRoom } from './net.js';
+import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
 
 const $ = s => document.querySelector(s);
@@ -296,16 +296,28 @@ function enterOnline() {
   if (!net) net = createNet(onNet, onNetStatus);
   $('#newBtn').textContent = 'Leave game';
 }
+// Give up the seat and go back to the main menu
 function leaveOnline() {
   if (net) net.leave();
+  exitOnline();
+  $('#setup').hidden = false;
+  refreshMineBtn();
+}
+// Step away from a game played at leisure, keeping the seat, and go to "My games"
+function stepAway() {
+  if (net) net.detach();
+  exitOnline();
+  openMine();
+}
+function exitOnline() {
   online = null; mode = 'quick'; cpu = null; aimLine.visible = false; tween = null; physicsOn = true;
   physics.removeStick(); resetBottles(); setStickHeld(); state = 'menu';
   $('#newBtn').textContent = 'New game'; $('#board').innerHTML = '';
   $('#ticker').hidden = true; $('#hubBtn').hidden = true;
-  ['#online', '#lobby', '#over', '#hub'].forEach(s => $(s).hidden = true);
-  $('#setup').hidden = false;
+  ['#online', '#lobby', '#over', '#hub', '#mine'].forEach(s => $(s).hidden = true);
   setRoomParam(null);
 }
+const isAsync = () => online?.room?.pace === 'async';
 function setRoomParam(code) {
   const u = new URL(location.href);
   if (code) u.searchParams.set('room', code); else u.searchParams.delete('room');
@@ -403,7 +415,10 @@ function onRoom(m) {
   online.room = m; online.seat = m.you;
   if (m.fixtures) online.fixtures = m.fixtures;
   if (m.league?.nextRoundIn != null) online.nextRoundAt = performance.now() + m.league.nextRoundIn;
+  online.roundEndsAt = m.league?.roundEndsIn != null ? performance.now() + m.league.roundEndsIn : null;
   $('#hubBtn').hidden = m.mode !== 'league' || !m.league || m.phase === 'lobby' || online.view === 'lobby';
+  // Played at leisure: you step away (keeping your seat) rather than leave
+  $('#newBtn').textContent = m.pace === 'async' ? 'My games' : 'Leave game';
   renderTicker(m, online.fixtures, online.watching, online.view === 'watch');
   const v = online.view, idle = !ANIMATING.includes(state) && !online.queue.length && !online.overQueued;
   if (v === 'lobby') {
@@ -451,17 +466,25 @@ function renderLobby() {
   $('#lbModeNote').textContent = league
     ? `Everyone plays everyone once. Each round's games are played at the same time, and you can watch the others when yours is done.${n >= 2 ? ` ${n} players: ${rounds} round${rounds > 1 ? 's' : ''}.` : ''}`
     : '';
+  const slow = r.pace === 'async';
+  $('#lbPace').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.pace === r.pace); b.disabled = !host; });
+  $('#lbPaceNote').textContent = !slow ? 'Everyone plays together now.'
+    : league ? 'Play your turns whenever suits you, over days. Each round lasts up to a day, and moves on as soon as its games are done. Bots finish any games still going at the deadline.'
+    : 'Play your turns whenever suits you, over days. If a turn waits two days, a bot plays it.';
   $('#lbTarget').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', +b.dataset.t === r.target); b.disabled = !host; });
+  // Played at leisure, people are often away; that's not worth marking.
+  const away = s => !s.connected && !slow;
   $('#lbSeats').innerHTML = r.seats.map((s, i) => `
-    <div class="slot ${s.connected ? '' : 'away'}"><span><i class="sw" style="background:${s.color}"></i>${esc(s.name)}
-      ${i === r.you ? '<small>(you)</small>' : ''}${i === r.host ? '<small>· host</small>' : ''}${s.cpu ? `<small>· ${s.cpu}</small>` : ''}${s.connected ? '' : '<small>· away</small>'}</span>
+    <div class="slot ${away(s) ? 'away' : ''}"><span><i class="sw" style="background:${s.color}"></i>${esc(s.name)}
+      ${i === r.you ? '<small>(you)</small>' : ''}${i === r.host ? '<small>· host</small>' : ''}${s.cpu ? `<small>· ${s.cpu}</small>` : ''}${away(s) ? '<small>· away</small>' : ''}</span>
       ${host && s.cpu ? `<button data-rm="${i}" aria-label="Remove ${esc(s.name)}">Remove</button>` : ''}</div>`).join('');
   $('#lbAdd').hidden = !host || n >= r.maxSeats;
   $('#lbStart').hidden = !host;
   $('#lbStart').textContent = league ? 'Start league' : 'Start game';
   $('#lbStart').disabled = n < 2;
   $('#lbWait').textContent = !host ? `Waiting for the host to start the ${league ? 'league' : 'game'}.`
-    : n < 2 ? 'Share the link, or add a computer player, to start.' : '';
+    : n < 2 ? 'Share the link, or add a computer player, to start.'
+    : slow ? 'Start when everyone’s in. You can close this and come back: it’s in My games.' : '';
 }
 
 // League screen. As the main view (between our games), or peeked at over the game we're playing or watching.
@@ -475,8 +498,11 @@ function peekHub() { refreshHub(); $('#hub').hidden = false; }
 function refreshHub() {
   if (!online?.room?.league) return;
   const secsToNext = online.room.phase === 'between' && online.nextRoundAt ? Math.max(0, Math.ceil((online.nextRoundAt - performance.now()) / 1000)) : null;
-  renderHub({ room: online.room, fixtures: online.fixtures, you: online.seat, view: online.view, watching: online.watching, secsToNext });
+  const roundLeft = online.roundEndsAt ? Math.max(0, online.roundEndsAt - performance.now()) : null;
+  renderHub({ room: online.room, fixtures: online.fixtures, you: online.seat, view: online.view, watching: online.watching, secsToNext, roundLeft });
 }
+// "13h", "40m": time left, roughly
+const timeLeft = ms => ms >= 3600_000 ? `${Math.round(ms / 3600_000)}h` : `${Math.max(1, Math.round(ms / 60_000))}m`;
 // Once a second: the countdown to the next round, and to the end of your turn (also when not drawing frames)
 setInterval(() => {
   if (online?.room?.phase === 'between' && !$('#hub').hidden) refreshHub();
@@ -535,6 +561,8 @@ function onlineSync(m) {
   $('#hubBtn').hidden = online.room?.mode !== 'league';
   renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
   if (m.t === 'sync' && m.over) return online.view === 'watch' ? showHub() : null;
+  // Back to a game played at leisure: the throws you missed follow, then your turn
+  if (m.replay) toast(`Catching up: ${m.replay} throw${m.replay > 1 ? 's' : ''} since you were last here`, 2600, true);
   if (m.t === 'sync' && m.turn) {
     if (m.turn.deadline != null) m.turn.endsAt = performance.now() + m.turn.deadline;
     onlineTurn(m.turn);
@@ -549,8 +577,13 @@ function onlineTurn(m) {
   state = mine && !m.cpu ? 'aim' : m.cpu ? 'cpu' : 'remote';
   online.turnEndsAt = state === 'aim' ? m.endsAt ?? null : null;
   renderBoard(); // the active chip shows whose turn it is
+  const p = game.players[m.cur], seat = online.room?.seats[p.seat];
   if (mine && m.standIn) toast('Out of time, so the computer is throwing for you', 2500, true);
   else if (state === 'aim' && !throwTip()) toast('Your turn', 1400);
+  // At leisure, after your throw: the other player may not be here. No need to wait around.
+  else if (isAsync() && !m.cpu && !mine && seat && !seat.connected && isMe(online.lastThrower)) {
+    toast(`${p.name}’s turn. They’ll see your throw when they’re back, and you can close this.`, 4000, true);
+  }
   if (m.cpu) cpu = { t: 0, aim: m.cpu.aim, target: m.cpu.target, online: true };
   if (mine && !m.cpu && !$('#hub').hidden && online.view === 'game') $('#hub').hidden = true; // your turn: back to the game
 }
@@ -564,7 +597,7 @@ function updateCountdown() {
 }
 function onlineThrow(m) {
   aimLine.visible = false; cpu = null; online.turnEndsAt = null;
-  online.play = m;
+  online.play = m; online.lastThrower = m.seat;
   scene.add(stickMesh); stickMesh.visible = true;
   state = 'flying'; flyTime = 0; landed = false; landRing.visible = false;
   updateCountdown();
@@ -655,9 +688,76 @@ $('#hubBtns').addEventListener('click', e => {
   if (act === 'back') $('#hub').hidden = true;
   else if (act === 'next') net.send({ t: 'next' });
   else if (act === 'room') showLobby();
+  else if (act === 'mine') stepAway();
   else if (act === 'leave') { if (online.room.phase === 'over' || confirm('Leave the league? The computer will play your remaining games.')) leaveOnline(); }
 });
-$('#hubLive').addEventListener('click', e => { const b = e.target.closest('button[data-act="watch"]'); if (b) watchMatch(b.dataset.match); });
+$('#hubLive').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]');
+  if (b?.dataset.act === 'watch') watchMatch(b.dataset.match);
+  if (b?.dataset.act === 'play') { online.watching = b.dataset.match; net.send({ t: 'watch', match: b.dataset.match }); } // back into our own game
+});
+$('#lbPace').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'pace', pace: b.dataset.pace }); });
+
+// ---------- My games ----------
+// Every room you have a seat in (live or at leisure), from the server, by your player key.
+async function openMine() {
+  ['#setup', '#online', '#over', '#league'].forEach(s => $(s).hidden = true);
+  $('#mineSub').textContent = 'Loading…'; $('#mineList').innerHTML = '';
+  $('#mineLink').textContent = personalLink();
+  $('#mine').hidden = false;
+  try { renderMine(await fetchMine()); }
+  catch (e) { $('#mineSub').textContent = 'Can’t reach the game server just now. Try again in a moment.'; }
+}
+const personalLink = () => { const u = new URL(location.href); u.search = ''; u.searchParams.set('me', myKey()); return u.href; };
+function mineStatus(g) {
+  const m = g.match, lg = g.league;
+  if (g.phase === 'lobby') return g.host ? 'Waiting for you to start it' : 'Waiting for the host to start';
+  if (g.phase === 'over') return lg ? `Finished · you came ${ordinal(lg.place)}` : 'Finished';
+  if (m?.yourTurn) return `Your turn${m.unseen ? ` · ${m.unseen} new throw${m.unseen > 1 ? 's' : ''} to watch` : ''}`;
+  if (m && !m.over) return `Waiting for ${m.turnOf}`;
+  return 'Your game is done · waiting for the round to finish';
+}
+function renderMine(games) {
+  const rank = g => g.match?.yourTurn ? 0 : g.phase === 'lobby' && g.host ? 1 : g.phase !== 'over' ? 2 : 3;
+  games.sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);
+  const turns = games.filter(g => g.match?.yourTurn).length;
+  $('#mineSub').textContent = !games.length ? '' : turns ? `It’s your turn in ${turns} game${turns > 1 ? 's' : ''}.` : 'Nothing waiting for you right now.';
+  $('#mineList').innerHTML = games.map(g => {
+    const lg = g.league, m = g.match;
+    const what = g.mode === 'league'
+      ? `League${lg ? ` · round ${lg.round} of ${lg.rounds}` : ''}${g.pace === 'async' ? '' : ' · live'}`
+      : `Game with ${g.players.filter(n => n !== g.you).map(esc).join(', ') || 'nobody yet'}`;
+    const score = m && g.phase !== 'lobby' ? ` · ${m.players.map(p => `${esc(p.name)} ${p.score}`).join(', ')}` : '';
+    const ends = lg?.roundEndsIn ? ` · round ends in ${timeLeft(lg.roundEndsIn)}` : m?.deadline ? ` · ${timeLeft(m.deadline)} left` : '';
+    const go = m?.yourTurn || (g.phase === 'lobby' && g.host);
+    return `<div class="fx"><span class="what"><b>${what}</b><span class="status ${go ? 'go' : ''}">${mineStatus(g)}${ends}</span>
+      <span class="status">Room ${g.code}${score}</span></span>
+      <button class="${go ? 'primary' : ''}" data-code="${g.code}">${m?.yourTurn ? 'Play' : 'Open'}</button></div>`;
+  }).join('');
+}
+function openGame(code) {
+  $('#mine').hidden = true;
+  enterOnline(); online.view = 'lobby';
+  net.start({ t: 'rejoin', code });
+}
+// The main menu's "My games" button, with how many games are waiting for you
+async function refreshMineBtn() {
+  const btn = $('#mineBtn');
+  btn.hidden = !hasKey();
+  if (btn.hidden) return;
+  btn.textContent = 'My games';
+  try {
+    const turns = (await fetchMine()).filter(g => g.match?.yourTurn).length;
+    if (turns) btn.textContent = `My games · ${turns} your turn`;
+  } catch (e) {}
+}
+$('#mineBtn').onclick = openMine;
+$('#mineBack').onclick = () => { $('#mine').hidden = true; $('#setup').hidden = false; refreshMineBtn(); };
+$('#mineNew').onclick = () => { $('#mine').hidden = true; openOnline(); };
+$('#mineList').addEventListener('click', e => { const b = e.target.closest('button[data-code]'); if (b) openGame(b.dataset.code); });
+$('#mineCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText(personalLink()); toast('Personal link copied', 1500); } catch (e) { toast(personalLink(), 5000); }
+};
 
 // ---------- Camera ----------
 const THROW_POS = V(0, 1.1, 0.9), THROW_LOOK = V(0, 0.05, -3.0);
@@ -780,6 +880,7 @@ $('#overNew').onclick = () => {
   $('#over').hidden = true; $('#setup').hidden = false; state = 'menu';
 };
 $('#newBtn').onclick = () => {
+  if (mode === 'online' && isAsync()) return stepAway(); // your seat is kept; carry on later from My games
   if (mode === 'online') { if (confirm('Leave this online game?')) leaveOnline(); return; }
   mode = 'quick'; leagueMatch = null; cpu = null; aimLine.visible = false; physics.removeStick(); resetBottles(); physicsOn = true; tween = null; state = 'menu'; $('#setup').hidden = false;
 };
@@ -793,8 +894,16 @@ $('#viewBtn').onclick = () => {
 
 setStickHeld();
 $('#loading').hidden = true;
+// A personal link (?me=…) brings that player's games to this device.
+const meParam = new URLSearchParams(location.search).get('me');
+if (meParam) {
+  const u = new URL(location.href); u.searchParams.delete('me'); history.replaceState(null, '', u);
+  const other = validKey(meParam) && (!hasKey() || myKey() !== meParam);
+  if (other && (!hasKey() || confirm('Use this personal link on this device? My games will show its games instead of this device’s.'))) setKey(meParam);
+}
 // A refresh in an online game rejoins it; a link to a different room offers to join that one instead.
 const roomParam = (new URLSearchParams(location.search).get('room') || '').toUpperCase().slice(0, 4), current = savedRoom();
 if (current && (!roomParam || roomParam === current)) { enterOnline(); net.resume(); }
 else if (roomParam) openOnline(roomParam);
-else $('#setup').hidden = false;
+else if (meParam && validKey(meParam)) openMine();
+else { $('#setup').hidden = false; refreshMineBtn(); }

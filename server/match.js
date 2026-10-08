@@ -1,6 +1,10 @@
 // One game between some seats: its own physics world, turns, timers and computer stand-ins.
 // A room runs one match at a time for a single game, or a round of them for a league.
 // Every message it sends carries `match: id` so clients know which game it belongs to.
+//
+// Pace: 'live' games expect everyone to be there (a turn timer, and bots step in for anyone who drops).
+// 'async' games are played at leisure: being away is normal, recent throws are kept so returning players
+// can watch what they missed, and turns only run out after a long limit (or the league round's deadline).
 import { createPhysics } from '../src/shared/physics.js';
 import { newPlayer, scoreThrow, isGameOver, advanceTurn, planRestand } from '../src/shared/rules.js';
 import { LEVELS, computeInfo, planCpuThrow } from '../src/shared/ai.js';
@@ -12,17 +16,21 @@ const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[
 // How long clients spend animating, in seconds; matches the local game. MILKKY_ANIM_SCALE=0 skips waits in tests.
 const ANIM_SCALE = env('MILKKY_ANIM_SCALE', 1);
 const SCORE_PAUSE = 1.3, RESTAND = 0.5, CPU_WINDUP = 1.95;
-const EARLY_GRACE = 300;                              // ms: accept a throw slightly before we expect animations to finish
-const TURN_TIME = env('MILKKY_TURN_SECONDS', 45) * 1000;  // then the computer throws for you
-const AWAY_GRACE = env('MILKKY_AWAY_SECONDS', 10) * 1000; // a disconnected player's turn waits this long (e.g. for a refresh)
-const STAND_IN = LEVELS.medium;                       // how well the computer plays for someone who isn't there
+const EARLY_GRACE = 300;                                  // ms: accept a throw slightly before we expect animations to finish
+export const TURN_TIME = env('MILKKY_TURN_SECONDS', 45) * 1000;            // live: then the computer throws for you
+export const ASYNC_TURN_TIME = env('MILKKY_ASYNC_TURN_HOURS', 48) * 3600_000; // async single game: likewise, much later
+const AWAY_GRACE = env('MILKKY_AWAY_SECONDS', 10) * 1000; // live: a disconnected player's turn waits this long (e.g. for a refresh)
+const STAND_IN = LEVELS.medium;                           // how well the computer plays for someone who isn't there
+const KEEP_THROWS = 12;                                   // async: most recent throws kept for catching up
 
 const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 export class Match {
   // seats: the players, in seat order. first: index of who throws first. onOver(match) when it ends.
-  constructor(room, id, seats, { target, first = 0, onOver = () => {} }) {
+  // turnTime: ms a person has for a turn before a bot plays it (null: no limit).
+  constructor(room, id, seats, { target, first = 0, onOver = () => {}, pace = 'live', turnTime = TURN_TIME }) {
     this.room = room; this.id = id; this.seats = seats; this.onOver = onOver;
+    this.pace = pace; this.turnTime = turnTime;
     this.physics = createPhysics(room.RAPIER);
     settle(this.physics);
     this.rng = mulberry32((Math.random() * 2 ** 32) >>> 0);
@@ -32,6 +40,10 @@ export class Match {
     };
     this.spectators = new Set();
     this.over = false; this.busyUntil = 0; this.timer = null; this.turnInfo = null;
+    this.autopilot = false; // bots finish the game (the league round's deadline passed)
+    // Async catching up: throws are numbered; `history` holds recent ones, `base` the state before the first
+    // of them, and seen[i] the last throw seat i has watched.
+    this.seq = 0; this.history = []; this.base = null; this.seen = seats.map(() => 0);
   }
 
   // ---------- Messages ----------
@@ -48,7 +60,7 @@ export class Match {
       players: g.players.map((p, i) => {
         const s = this.seats[i];
         return { name: p.name, cpu: p.cpu, color: p.color, score: p.score, misses: p.misses, out: p.out,
-          seat: this.room.seatIndex(s), away: !s.cpu && !s.connected, left: !!s.left };
+          seat: this.room.seatIndex(s), away: this.pace === 'live' && !s.cpu && !s.connected, left: !!s.left };
       }),
     };
   }
@@ -61,6 +73,33 @@ export class Match {
     const t = { ...this.turnInfo };
     if (this.deadline) t.deadline = Math.max(0, this.deadline - Date.now());
     return t;
+  }
+  // A player (re)joining: the game as it stands, or, in an async game, as it was when they last looked,
+  // followed by the throws they missed (their screen plays them in order) and then the current turn.
+  catchUp(seat) {
+    const i = this.seats.indexOf(seat);
+    const missed = i >= 0 ? this.history.filter(h => h.seq > this.seen[i]) : [];
+    if (!missed.length) { if (!this.over) this.room.send(seat, this.syncState()); return; }
+    const k = this.history.indexOf(missed[0]);
+    const from = k > 0 ? this.history[k - 1] : this.base;
+    this.room.send(seat, { t: 'sync', match: this.id, game: from.game, poses: from.poses, over: false, turn: null, replay: missed.length });
+    for (const h of missed) this.room.send(seat, { ...h, match: this.id });
+    if (this.turnInfo && !this.over) this.room.send(seat, { t: 'turn', match: this.id, ...this.turnNow() });
+    this.seen[i] = this.seq;
+    this.prune();
+  }
+  unseenBy(seat) {
+    const i = this.seats.indexOf(seat);
+    return i < 0 ? 0 : this.history.filter(h => h.seq > this.seen[i]).length;
+  }
+  // Keep only throws someone still needs to catch up on (and not too many of those)
+  prune() {
+    const people = this.seats.map((s, i) => i).filter(i => !this.seats[i].cpu && !this.seats[i].left);
+    const allSeen = people.length ? Math.min(...people.map(i => this.seen[i])) : this.seq;
+    while (this.history.length && (this.history[0].seq <= allSeen || this.history.length > KEEP_THROWS)) {
+      const h = this.history.shift();
+      this.base = { game: h.game, poses: h.poses };
+    }
   }
 
   // ---------- From players ----------
@@ -86,11 +125,18 @@ export class Match {
     this.send({ t: 'status', game: this.publicGame() });
     if (this.seats[this.game.cur] !== seat || this.turnInfo?.cpu) return;
     if (seat.left) this.standIn();
-    else this.armTurnTimer();
+    else if (this.pace === 'live') this.armTurnTimer(); // async: being away is normal
+  }
+  // The league round's time is up: bots play every remaining turn, people's included.
+  finishWithBots() {
+    if (this.over) return;
+    this.autopilot = true;
+    if (!this.turnInfo?.cpu) this.standIn();
   }
 
   // ---------- Turns ----------
   start() {
+    if (this.pace === 'async') this.base = { game: this.publicGame(), poses: snapshot(this.physics) };
     this.send({ t: 'start', game: this.publicGame(), poses: snapshot(this.physics) });
     this.beginTurn(0);
   }
@@ -101,18 +147,19 @@ export class Match {
     this.turnStart = Date.now() + delay * 1000;
     this.deadline = null;
     if (p.cpu) return this.computerTurn(delay, p.ai);
-    if (seat.left) return this.computerTurn(delay, STAND_IN, true);
-    this.deadline = this.turnStart + TURN_TIME;
+    if (seat.left || this.autopilot) return this.computerTurn(delay, STAND_IN, true);
+    this.deadline = this.turnTime ? this.turnStart + this.turnTime : null;
     this.turnInfo = { cur: i };
     this.send({ t: 'turn', ...this.turnNow() });
     this.armTurnTimer();
   }
-  // A person's turn ends at the deadline, or sooner if they've lost their connection.
+  // A person's turn ends at the deadline (if there is one), or, live, sooner if they've lost their connection.
   armTurnTimer() {
     clearTimeout(this.timer);
     const seat = this.seats[this.game.cur];
     let at = this.deadline;
-    if (!seat.connected) at = Math.max(this.turnStart, Math.min(at, (seat.awaySince || Date.now()) + AWAY_GRACE));
+    if (this.pace === 'live' && !seat.connected) at = Math.max(this.turnStart, Math.min(at, (seat.awaySince || Date.now()) + AWAY_GRACE));
+    if (at == null) return;
     this.timer = setTimeout(() => this.standIn(), Math.max(0, at - Date.now()));
   }
   // The computer throws for a person who ran out of time, isn't connected, or left.
@@ -149,14 +196,22 @@ export class Match {
 
     const over = isGameOver(game);
     if (!over) advanceTurn(game);
-    this.send({
-      t: 'throw', seat: thrower, dist, aim, fps, bodies, frames, fallen, msg, restand,
+    const t = {
+      t: 'throw', seq: ++this.seq, seat: thrower, dist, aim, fps, bodies, frames, fallen, msg, restand,
       poses: snapshot(physics), game: this.publicGame(), over,
-    });
+    };
+    this.send(t);
+    if (this.pace === 'async') {
+      // Players connected now have just watched it; the rest catch up when they come back.
+      this.seats.forEach((s, i) => { if (s.ws) this.seen[i] = t.seq; });
+      this.history.push(t);
+      this.prune();
+    }
+    if (over) { this.over = true; this.turnInfo = null; this.deadline = null; }
     this.room.matchUpdated(this);
     const anim = (frames.length / fps + SCORE_PAUSE + RESTAND) * ANIM_SCALE;
     this.busyUntil = Date.now() + anim * 1000;
-    if (over) { this.over = true; this.turnInfo = null; this.deadline = null; this.onOver(this); }
+    if (over) this.onOver(this);
     else this.beginTurn(anim);
   }
 
@@ -166,18 +221,21 @@ export class Match {
   serialize(seatRef) {
     const g = this.game;
     return {
-      id: this.id, fixture: this.fixture || null, over: this.over,
+      id: this.id, fixture: this.fixture || null, over: this.over, pace: this.pace, turnTime: this.turnTime,
+      autopilot: this.autopilot, deadline: this.turnInfo && !this.turnInfo.cpu ? this.deadline : null,
       seats: this.seats.map(seatRef),
       game: {
         cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
         players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })),
       },
       poses: snapshot(this.physics),
+      seq: this.seq, history: this.history, base: this.base, seen: this.seen,
     };
   }
   static restore(room, d, seats, onOver) {
-    const m = new Match(room, d.id, seats, { target: d.game.target, first: d.game.cur, onOver });
-    m.fixture = d.fixture; m.over = d.over;
+    const m = new Match(room, d.id, seats, { target: d.game.target, first: d.game.cur, onOver, pace: d.pace || 'live', turnTime: d.turnTime === undefined ? TURN_TIME : d.turnTime });
+    Object.assign(m, { fixture: d.fixture, over: d.over, autopilot: !!d.autopilot, savedDeadline: d.deadline || null });
+    if (d.seq) Object.assign(m, { seq: d.seq, history: d.history || [], base: d.base || null, seen: d.seen || m.seen });
     d.game.players.forEach((p, i) => Object.assign(m.game.players[i], p));
     m.game.winner = d.game.winner >= 0 ? m.game.players[d.game.winner] : null;
     m.physics.bottles.forEach((b, i) => {
@@ -186,8 +244,13 @@ export class Match {
     });
     return m;
   }
-  // After a restore: carry on with whoever's turn it was
-  resume() { if (!this.over) this.beginTurn(0); }
+  // After a restore: carry on with whoever's turn it was (keeping a person's original deadline)
+  resume() {
+    if (this.over) return;
+    if (this.pace === 'async' && !this.base) this.base = { game: this.publicGame(), poses: snapshot(this.physics) };
+    this.beginTurn(0);
+    if (this.savedDeadline && this.turnInfo && !this.turnInfo.cpu) { this.deadline = this.savedDeadline; this.armTurnTimer(); }
+  }
 
   dispose() { clearTimeout(this.timer); this.over = true; this.physics.world.free(); }
 }
