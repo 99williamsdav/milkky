@@ -52,6 +52,7 @@ body{height:100%;background:var(--sky);color:var(--ink);
   background:var(--panel);border:1px solid var(--line);padding:10px 18px;border-radius:999px;font-size:22px;font-weight:800;
   white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis;transition:opacity .25s, transform .25s}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+#toast{z-index:6}
 /* Side panel on the right, so the lower centre of the screen is clear for the swing */
 .bottom{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;
   align-items:flex-end;width:min(220px,40vw)}
@@ -97,6 +98,27 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #lgResults b{font-weight:800}
 #lgNext{font-size:15px;margin:0 0 14px}
 .sectionlabel{font-weight:600;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 4px}
+.card input{font:inherit;font-size:17px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);
+  width:100%;-webkit-user-select:text;user-select:text}
+.card input:focus-visible{outline:3px solid var(--blue);outline-offset:1px}
+.card label{display:block;font-weight:600;margin:0 0 6px}
+.field{margin:0 0 16px}
+.joinrow{display:flex;gap:8px}
+.joinrow input{text-transform:uppercase;letter-spacing:.2em;font-weight:800}
+.err{color:var(--bad);font-size:14px;margin:0 0 12px}
+.err:empty{display:none}
+.or{color:var(--muted);font-size:13px;text-align:center;margin:14px 0}
+.linkrow{display:flex;gap:8px;align-items:center;margin:0 0 18px}
+.linkrow code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--muted)}
+#lbSeats{display:flex;flex-direction:column;gap:6px;margin:0 0 14px}
+.slot small{font-weight:400;color:var(--muted)}
+.slot.away{opacity:.5}
+#lbAdd{margin:0 0 18px;align-items:center}
+#lbAdd[hidden]{display:none}
+#lbAdd span{font-size:13px;color:var(--muted)}
+#lbAdd button{font-size:13px;padding:6px 12px}
+.count button:disabled{opacity:.6;cursor:default}
+#lbWait{color:var(--muted);margin:0 0 14px}
 @media (prefers-reduced-motion: reduce){ .chip,#toast{transition:none} }
 </style>
 </head>
@@ -129,7 +151,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <button data-n="1">1</button><button data-n="2" aria-pressed="true">2</button><button data-n="3">3</button><button data-n="4">4</button>
       </div>
       <div id="slots"></div>
-      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="setupRules">Rules</button></div>
+      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="onlineBtn">Play online</button><button id="setupRules">Rules</button></div>
     </div>
   </div>
 
@@ -158,6 +180,34 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div class="tablewrap"><table id="lgTable"></table></div>
       <div id="lgNext"></div>
       <div class="row"><button class="primary" id="lgPlay">Play match</button><button id="lgMenu">Menu</button><button id="lgReset">New league</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="online" hidden>
+    <div class="card">
+      <h2>Play online</h2>
+      <p class="sub">Play with friends on their own devices. Create a room and share the code, or join theirs.</p>
+      <div class="field"><label for="onName">Your name</label><input id="onName" maxlength="16" autocomplete="nickname" placeholder="e.g. Sam"></div>
+      <p class="err" id="onErr" role="alert"></p>
+      <button class="primary" id="onCreate" style="width:100%">Create a room</button>
+      <div class="or">or join a friend&#39;s room</div>
+      <div class="field joinrow"><input id="onCode" maxlength="4" autocomplete="off" placeholder="CODE" aria-label="Room code"><button id="onJoin">Join</button></div>
+      <button id="onBack">Back</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="lobby" hidden>
+    <div class="card">
+      <h2 id="lbTitle">Room</h2>
+      <p class="sub">Share this link or the code so others can join.</p>
+      <div class="linkrow"><code id="lbLink"></code><button id="lbCopy">Copy link</button></div>
+      <div style="font-weight:600">Play to</div>
+      <div class="count" id="lbTarget"><button data-t="20">20</button><button data-t="30">30</button><button data-t="50">50</button></div>
+      <div style="font-weight:600;margin-bottom:6px">Players</div>
+      <div id="lbSeats"></div>
+      <div class="row" id="lbAdd"><span>Add computer:</span><button data-level="easy">Easy</button><button data-level="medium">Medium</button><button data-level="hard">Hard</button></div>
+      <p id="lbWait"></p>
+      <div class="row"><button class="primary" id="lbStart">Start game</button><button id="lbLeave">Leave room</button></div>
     </div>
   </div>
 
