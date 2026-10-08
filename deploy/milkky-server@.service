@@ -1,0 +1,27 @@
+# Milkky game server, one instance per environment:
+#   milkky-server@staging    -> /var/www/milkky/staging/server,    settings in /etc/milkky/staging.env
+#   milkky-server@production -> /var/www/milkky/production/server, settings in /etc/milkky/production.env
+# Install: sudo cp milkky-server@.service /etc/systemd/system/ && sudo systemctl daemon-reload
+[Unit]
+Description=Milkky game server (%i)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/milkky/%i.env
+Environment=NODE_ENV=production
+# The staging/production symlink is resolved at start, so a restart picks up a new release.
+WorkingDirectory=/var/www/milkky/%i/server
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=2
+
+# Runs as a throwaway user with read-only access to the system
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

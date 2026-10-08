@@ -4,12 +4,16 @@ name: Deploy
 # The "production" job then waits for approval; approving it points production
 # at the exact same release. To roll back, open an older run and re-run its
 # "Promote to production" job.
+#
+# A release mirrors the repo: releases/<sha>/src (the web root) and releases/<sha>/server (the game
+# server, run by systemd as milkky-server@staging / milkky-server@production).
 
 on:
   push:
     branches: [main]
     paths:
       - "src/**"
+      - "server/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
@@ -38,12 +42,19 @@ jobs:
       - name: Upload release
         run: |
           echo "$RELEASE" > src/version.txt
-          ssh "$TARGET" "mkdir -p $BASE/releases/$RELEASE"
-          rsync -az --delete src/ "$TARGET:$BASE/releases/$RELEASE/"
+          ssh "$TARGET" "mkdir -p $BASE/releases/$RELEASE/src $BASE/releases/$RELEASE/server"
+          rsync -az --delete src/ "$TARGET:$BASE/releases/$RELEASE/src/"
+          rsync -az --delete --exclude node_modules --exclude test server/ "$TARGET:$BASE/releases/$RELEASE/server/"
+          ssh "$TARGET" "cd $BASE/releases/$RELEASE/server && npm ci --omit=dev --no-audit --no-fund"
 
       - name: Point staging at this release
         run: |
           ssh "$TARGET" "cd $BASE && ln -sfn releases/$RELEASE staging.tmp && mv -Tf staging.tmp staging"
+
+      - name: Restart staging game server
+        run: |
+          ssh "$TARGET" "sudo systemctl restart milkky-server@staging"
+          ssh "$TARGET" "for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS http://127.0.0.1:8081/health && exit 0; sleep 1; done; exit 1"
 
       - name: Prune old releases (keep 10 + whatever is live)
         run: |
@@ -72,3 +83,9 @@ jobs:
       - name: Point production at this release
         run: |
           ssh "$TARGET" "cd $BASE && test -d releases/$RELEASE && ln -sfn releases/$RELEASE production.tmp && mv -Tf production.tmp production"
+
+      # Note: restarting ends any online games in progress.
+      - name: Restart production game server
+        run: |
+          ssh "$TARGET" "sudo systemctl restart milkky-server@production"
+          ssh "$TARGET" "for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS http://127.0.0.1:8080/health && exit 0; sleep 1; done; exit 1"

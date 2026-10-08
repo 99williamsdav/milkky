@@ -1,0 +1,16 @@
+{
+  "name": "milkky-server",
+  "private": true,
+  "type": "module",
+  "description": "Online game server for Milkky: rooms, turns and server-side throw physics",
+  "main": "index.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test/play.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.14.0",
+    "ws": "^8.18.0"
+  }
+}
