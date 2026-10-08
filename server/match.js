@@ -160,5 +160,34 @@ export class Match {
     else this.beginTurn(anim);
   }
 
+  // ---------- Saving and restoring ----------
+  // Between throws everything is at rest, so scores, turn and bottle positions are the whole game.
+  // seatRef(seat): how the room refers to a seat.
+  serialize(seatRef) {
+    const g = this.game;
+    return {
+      id: this.id, fixture: this.fixture || null, over: this.over,
+      seats: this.seats.map(seatRef),
+      game: {
+        cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
+        players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })),
+      },
+      poses: snapshot(this.physics),
+    };
+  }
+  static restore(room, d, seats, onOver) {
+    const m = new Match(room, d.id, seats, { target: d.game.target, first: d.game.cur, onOver });
+    m.fixture = d.fixture; m.over = d.over;
+    d.game.players.forEach((p, i) => Object.assign(m.game.players[i], p));
+    m.game.winner = d.game.winner >= 0 ? m.game.players[d.game.winner] : null;
+    m.physics.bottles.forEach((b, i) => {
+      const [x, y, z, qx, qy, qz, qw] = d.poses[i];
+      b.body.setTranslation({ x, y, z }, true); b.body.setRotation({ x: qx, y: qy, z: qz, w: qw }, true);
+    });
+    return m;
+  }
+  // After a restore: carry on with whoever's turn it was
+  resume() { if (!this.over) this.beginTurn(0); }
+
   dispose() { clearTimeout(this.timer); this.over = true; this.physics.world.free(); }
 }

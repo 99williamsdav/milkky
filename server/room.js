@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { LEVELS, BOT_NAMES } from '../src/shared/ai.js';
 import { roundRobin } from '../src/shared/schedule.js';
 import { Match } from './match.js';
+import * as store from './store.js';
 
 const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[name] : fallback);
 export const MAX_SEATS = { game: 4, league: 8 };
@@ -13,6 +14,7 @@ const CPU_LEVELS = Object.keys(LEVELS);
 const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
 const LOBBY_GRACE = 60_000; // ms a disconnected player keeps their lobby seat, so a refresh doesn't lose it
 const BETWEEN_ROUNDS = env('MILKKY_BETWEEN_SECONDS', 20) * 1000;
+const RESTART_GRACE = 20_000; // after a server restart, extra time for players to reconnect before bots take their turns
 
 export const cleanName = s => String(s ?? '').replace(/[\u0000-\u001f<>&"'`]/g, '').trim().slice(0, 16);
 // Computer players are "Aino (bot)"; people can't give themselves that suffix.
@@ -125,7 +127,11 @@ export class Room {
       fixtures: this.mode === 'league' ? this.fixtures() : null,
     };
   }
-  broadcastRoom() { for (const seat of this.seats) this.send(seat, this.roomState(seat)); }
+  // Every change to the room goes out to its players, so this is also where it's saved.
+  broadcastRoom() {
+    for (const seat of this.seats) this.send(seat, this.roomState(seat));
+    store.save(this);
+  }
   // After (re)joining: the game this seat is in, as it stands now
   resync(seat) {
     const m = this.inProgress && this.matchOf(seat);
@@ -134,6 +140,7 @@ export class Room {
   // Called by a match after every throw
   matchUpdated() {
     if (this.mode === 'league') this.broadcast({ t: 'fixtures', fixtures: this.fixtures() });
+    store.save(this);
   }
 
   // ---------- Handling a seat's message ----------
@@ -224,9 +231,12 @@ export class Room {
     lg.round++;
     this.disposeMatches();
     this.phase = 'playing';
-    this.matches = lg.schedule[lg.round].map(([a, b], k) => new Match(this, `r${lg.round + 1}-${k + 1}`,
-      [lg.entries[a].seat, lg.entries[b].seat],
-      { target: this.target, first: lg.round % 2, onOver: m => this.fixtureOver(m, a, b) }));
+    this.matches = lg.schedule[lg.round].map(([a, b], k) => {
+      const m = new Match(this, `r${lg.round + 1}-${k + 1}`, [lg.entries[a].seat, lg.entries[b].seat],
+        { target: this.target, first: lg.round % 2, onOver: m => this.fixtureOver(m, a, b) });
+      m.fixture = [a, b]; // which league entries are playing
+      return m;
+    });
     this.broadcastRoom();
     this.matches.forEach(m => m.start());
   }
@@ -251,6 +261,56 @@ export class Room {
       this.timer = setTimeout(() => this.startRound(), BETWEEN_ROUNDS);
     }
     this.broadcastRoom();
+  }
+
+  // ---------- Saving and restoring ----------
+  serialize() {
+    const lg = this.league;
+    // Seats are saved once; league entries and matches refer to them by position (or, for the filler, inline).
+    const entryOf = seat => lg ? lg.entries.findIndex(e => e.seat === seat) : -1;
+    const seatRef = seat => this.seats.includes(seat) ? { s: this.seatIndex(seat) } : { e: entryOf(seat) };
+    return {
+      v: 1, code: this.code, mode: this.mode, phase: this.phase, target: this.target, nextRoundAt: this.nextRoundAt || null,
+      seats: this.seats.map(s => ({ name: s.name, cpu: s.cpu, token: s.token, left: !!s.left })),
+      league: lg && {
+        round: lg.round, schedule: lg.schedule, results: lg.results,
+        entries: lg.entries.map(e => ({
+          seat: this.seats.includes(e.seat) ? { s: this.seatIndex(e.seat) } : { filler: { name: e.seat.name, cpu: e.seat.cpu } },
+          P: e.P, W: e.W, L: e.L, PF: e.PF, PA: e.PA,
+        })),
+      },
+      matches: this.matches.map(m => m.serialize(seatRef)),
+    };
+  }
+  // Rebuild a saved room. Nobody is connected yet: people have a while to come back before the
+  // computer plays their turns, as if they'd all just dropped their connection.
+  static restore(d, RAPIER) {
+    const room = new Room(d.code, RAPIER);
+    const back = Date.now() + RESTART_GRACE;
+    Object.assign(room, { mode: d.mode, phase: d.phase, target: d.target, nextRoundAt: d.nextRoundAt, emptySince: Date.now() });
+    room.seats = d.seats.map(s => ({ ...s, ws: null, connected: !!s.cpu, awaySince: back }));
+    if (d.league) {
+      room.league = {
+        round: d.league.round, schedule: d.league.schedule, results: d.league.results,
+        entries: d.league.entries.map(e => ({
+          ...e, seat: e.seat.filler ? { ...e.seat.filler, connected: true, filler: true } : room.seats[e.seat.s],
+        })),
+      };
+    }
+    const seatOf = r => r.s != null ? room.seats[r.s] : room.league.entries[r.e].seat;
+    room.matches = d.matches.map(md => Match.restore(room, md, md.seats.map(seatOf), md.fixture
+      ? m => room.fixtureOver(m, md.fixture[0], md.fixture[1])
+      : () => room.gameOver()));
+    // Carry on: unfinished games continue, the countdown to the next round resumes, and lobby seats
+    // that nobody comes back for are let go as usual.
+    room.matches.forEach(m => m.resume());
+    if (room.phase === 'between') room.timer = setTimeout(() => room.startRound(), Math.max(0, d.nextRoundAt - Date.now()));
+    if (!room.inProgress) {
+      for (const s of room.seats.filter(s => !s.cpu)) {
+        s.dropTimer = setTimeout(() => { if (!s.connected && !room.inProgress) { room.removeSeat(s); room.broadcastRoom(); } }, LOBBY_GRACE);
+      }
+    }
+    return room;
   }
 
   disposeMatches() { this.matches.forEach(m => m.dispose()); this.matches = []; }

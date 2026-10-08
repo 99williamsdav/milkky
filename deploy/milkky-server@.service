@@ -16,7 +16,11 @@ ExecStart=/usr/bin/node index.js
 Restart=always
 RestartSec=2
 
-# Runs as a throwaway user with read-only access to the system
+# Saved games live in /var/lib/milkky/<env>, outside the release folders, so deploys keep them.
+# systemd creates it and passes it to the server as STATE_DIRECTORY.
+StateDirectory=milkky/%i
+
+# Runs as a throwaway user with read-only access to the system (apart from the folder above)
 DynamicUser=yes
 NoNewPrivileges=yes
 ProtectSystem=strict

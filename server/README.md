@@ -7,10 +7,13 @@ It imports the game code from `../src/shared/`, so deploy it alongside `src/`.
 ```
 npm install
 npm start          # PORT (default 8080), HOST (default 127.0.0.1)
-npm test           # single game, computer stand-ins, and a full league, against a real server
+npm test           # single game, computer stand-ins, a full league, and restarting mid-game, against a real server
 ```
 
 `GET /health` → `ok <n> rooms`. WebSocket at `/ws`. All messages are JSON with a `t` field.
+
+Games are saved to disk (one JSON file per room) and picked up again after a restart or deploy. The folder is
+`MILKKY_DATA_DIR`, else systemd's `STATE_DIRECTORY` (see `deploy/milkky-server@.service`), else `server/data`.
 
 Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits), `MILKKY_TURN_SECONDS` (45),
 `MILKKY_AWAY_SECONDS` (10), `MILKKY_BETWEEN_SECONDS` (20, between league rounds).
@@ -20,6 +23,7 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 - `room.js`: lobby, seats, single game or league (schedule, rounds, table).
 - `match.js`: one game: physics world, turns, turn timer, computer stand-ins.
 - `sim.js`: runs a throw to rest and records it.
+- `store.js`: saves rooms to disk and loads them at startup.
 
 ## Client → server
 

@@ -7,14 +7,16 @@ const score = f => `${f.players[0].score}–${f.players[1].score}`;
 // The fixture this seat is playing in this round
 export const myFixture = (fixtures, you) => (fixtures || []).find(f => f.seats.includes(you)) || null;
 
-// The other games, as small pills under the scoreboard. `showing`: the match on screen (left out).
-export function renderTicker(room, fixtures, showing) {
+// The other games, as small pills under the scoreboard. `showing`: the match on screen (left out);
+// `watching`: it's someone else's game.
+export function renderTicker(room, fixtures, showing, watching = false) {
   const el = $('#ticker');
-  const others = room?.mode === 'league' && room.phase === 'playing' ? (fixtures || []).filter(f => f.id !== showing) : [];
-  el.hidden = !others.length;
-  if (!others.length) return;
+  const live = room?.mode === 'league' && room.phase === 'playing';
+  const others = live ? (fixtures || []).filter(f => f.id !== showing) : [];
+  el.hidden = !live || (!others.length && !watching);
+  if (el.hidden) return;
   const lg = room.league;
-  el.innerHTML = `<span class="lbl">Round ${lg.round} of ${lg.rounds}</span>` + others.map(f =>
+  el.innerHTML = `<span class="lbl">${watching ? 'Watching · ' : ''}Round ${lg.round} of ${lg.rounds}</span>` + others.map(f =>
     `<span>${esc(f.players[0].name)} <b>${score(f)}</b> ${esc(f.players[1].name)}${f.over ? ' <span class="lbl">final</span>' : ''}</span>`).join('');
 }
 

@@ -4,6 +4,7 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import RAPIER_MOD from '@dimforge/rapier3d-compat';
 import { Room } from './room.js';
+import * as store from './store.js';
 
 const RAPIER = RAPIER_MOD.default || RAPIER_MOD;
 await RAPIER.init();
@@ -21,6 +22,12 @@ function newCode() {
   }
 }
 const findRoom = code => rooms.get(String(code ?? '').toUpperCase().trim());
+
+// Pick up where we left off before the last restart or deploy
+for (const d of store.loadAll()) {
+  try { rooms.set(d.code, Room.restore(d, RAPIER)); }
+  catch (err) { console.error('could not restore room', d.code, err); }
+}
 
 const server = http.createServer((req, res) => {
   if (req.url === '/health') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end(`ok ${rooms.size} rooms\n`); }
@@ -95,9 +102,12 @@ setInterval(() => {
   }
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (room.emptySince && now - room.emptySince > EMPTY_ROOM_TTL) { room.dispose(); rooms.delete(code); }
+    if (room.emptySince && now - room.emptySince > EMPTY_ROOM_TTL) { room.dispose(); rooms.delete(code); store.remove(code); }
   }
 }, 30_000).unref();
 
-server.listen(PORT, HOST, () => console.log(`milkky server on ${HOST}:${PORT}`));
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { wss.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); });
+server.listen(PORT, HOST, () => console.log(`milkky server on ${HOST}:${PORT} (${rooms.size} rooms restored from ${store.dataDir})`));
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
+  store.flush(); // write anything not yet saved
+  wss.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref();
+});

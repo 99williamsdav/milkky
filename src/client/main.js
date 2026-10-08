@@ -77,9 +77,9 @@ function beginTurn() {
   const p = game.players[game.cur];
   state = p.cpu ? 'cpu' : 'aim';
   renderBoard();
-  const need = game.target - p.score;
-  $('#turn').innerHTML = `<b style="color:${p.color}">${p.name}</b>${p.name === 'You' ? '' : "'s turn"} · ${p.score} points, ${need} to go`;
-  if (p.cpu) cpuPlan(p);
+  if (p.cpu) return cpuPlan(p);
+  // The scoreboard shows whose turn it is; say it out loud only when people share the device.
+  if (!throwTip() && game.players.filter(q => !q.cpu).length > 1) toast(`${p.name}'s turn`, 1400);
 }
 function renderBoard() {
   $('#board').innerHTML = game.players.map((p, i) => `
@@ -87,12 +87,22 @@ function renderBoard() {
       <div class="nm"><span class="sw" style="background:${p.color}"></span>${esc(p.name)}${isMe(i) ? ' (you)' : ''}${p.left ? '<small>· computer</small>' : p.away ? '<small>· away</small>' : ''}</div>
       <div class="sc">${p.score}<small>/${game.target}</small></div>
       <div class="dots">${[0, 1, 2].map(k => `<i class="${k < p.misses ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="cd"></div>
     </div>`).join('');
 }
 let toastTimer;
-function toast(msg, ms = 2000) {
-  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+// small: a longer message in smaller text that can wrap
+function toast(msg, ms = 2000, small = false) {
+  const t = $('#toast'); t.textContent = msg; t.classList.toggle('small', small); t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+// How to throw, once per visit, on the first turn that's yours. Returns true if it was shown.
+let tipShown = false;
+function throwTip() {
+  if (tipShown) return false;
+  tipShown = true;
+  toast('Drag down, then flick up to throw. Press left or right of centre to aim.', 4000, true);
+  return true;
 }
 
 // ---------- Throwing ----------
@@ -145,7 +155,6 @@ function release(e, cancel) {
   // Flick sets intended distance (gentle curve), then solve for the launch speed that reaches it.
   const dist = THREE.MathUtils.clamp(3.6 * Math.pow(up / 2, 0.75), MIN_DIST, MAX_DIST);
   const speed = launchSpeedFor(dist);
-  $('#hint').textContent = `Last throw: ${throwText(dist, curAim)}`;
   if (mode === 'online') {
     // The server simulates it; hold the follow-through until its recording arrives.
     net.send({ t: 'throw', dist, aim: curAim });
@@ -154,7 +163,6 @@ function release(e, cancel) {
   }
   throwStick(speed, curAim);
 }
-const throwText = (dist, aim) => `${dist.toFixed(1)} m, aim ${Math.abs(Math.round(THREE.MathUtils.radToDeg(aim)))}° ${aim < -0.01 ? 'left' : aim > 0.01 ? 'right' : 'straight'}`;
 canvas.addEventListener('pointerup', e => release(e, false));
 canvas.addEventListener('pointercancel', e => release(e, true));
 
@@ -162,15 +170,11 @@ canvas.addEventListener('pointercancel', e => release(e, true));
 let cpu = null;
 function cpuPlan(pl) {
   cpu = { t: 0, ...planCpuThrow(pl, computeInfo(physics.bottleSpots()), game.target) };
-  $('#hint').textContent = `${pl.name} is lining up…`;
 }
 function cpuTick(dt) {
   cpu.t += dt;
   const t = cpu.t;
-  if (t > 0.7 && !aimLine.visible) {
-    updateAimLine(cpu.aim); aimLine.visible = true;
-    $('#hint').textContent = `${game.players[game.cur].name} is going for bottle ${cpu.target}`;
-  }
+  if (t > 0.7 && !aimLine.visible) { updateAimLine(cpu.aim); aimLine.visible = true; }
   if (t > 1.2 && t <= 1.8) setStickHeld((t - 1.2) / 0.6, cpu.aim);
   else if (t > 1.8 && t <= 1.95) setStickHeld(1 - (t - 1.8) / 0.15 * 1.3, cpu.aim);
   else if (t > 1.95) {
@@ -214,7 +218,7 @@ function finishRestand() {
 }
 function showOver() {
   const { winner } = game;
-  state = 'over'; renderBoard(); $('#turn').textContent = 'Game over';
+  state = 'over'; renderBoard();
   $('#overTitle').textContent = !winner ? 'Out after three misses' : isMe(game.players.indexOf(winner)) ? 'You win!' : `${winner.name} ${verb(winner, 'wins', 'win')}!`;
   const sorted = [...game.players].sort((a, b) => b.score - a.score);
   $('#standings').innerHTML = sorted.map(p => `<li><span style="color:${p.color};font-weight:600">${esc(p.name)}${p.out ? ' (out)' : ''}</span><b>${p.score}</b></li>`).join('');
@@ -296,7 +300,7 @@ function leaveOnline() {
   if (net) net.leave();
   online = null; mode = 'quick'; cpu = null; aimLine.visible = false; tween = null; physicsOn = true;
   physics.removeStick(); resetBottles(); setStickHeld(); state = 'menu';
-  $('#newBtn').textContent = 'New game'; $('#board').innerHTML = ''; $('#turn').textContent = '';
+  $('#newBtn').textContent = 'New game'; $('#board').innerHTML = '';
   $('#ticker').hidden = true; $('#hubBtn').hidden = true;
   ['#online', '#lobby', '#over', '#hub'].forEach(s => $(s).hidden = true);
   $('#setup').hidden = false;
@@ -359,7 +363,7 @@ function onNet(m) {
     case 'room': return onRoom(m);
     case 'fixtures': // live scores during a league round
       online.fixtures = m.fixtures;
-      renderTicker(online.room, online.fixtures, online.watching);
+      renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
       if (!$('#hub').hidden) refreshHub();
       return;
     case 'error':
@@ -400,7 +404,7 @@ function onRoom(m) {
   if (m.fixtures) online.fixtures = m.fixtures;
   if (m.league?.nextRoundIn != null) online.nextRoundAt = performance.now() + m.league.nextRoundIn;
   $('#hubBtn').hidden = m.mode !== 'league' || !m.league || m.phase === 'lobby' || online.view === 'lobby';
-  renderTicker(m, online.fixtures, online.watching);
+  renderTicker(m, online.fixtures, online.watching, online.view === 'watch');
   const v = online.view, idle = !ANIMATING.includes(state) && !online.queue.length && !online.overQueued;
   if (v === 'lobby') {
     // A league round starting with our game in it: the start message takes over.
@@ -463,7 +467,7 @@ function renderLobby() {
 // League screen. As the main view (between our games), or peeked at over the game we're playing or watching.
 function showHub() {
   online.view = 'hub'; online.overQueued = false; state = 'menu'; cpu = null; aimLine.visible = false;
-  online.turnEndsAt = null; $('#turn').textContent = ''; $('#hint').textContent = '';
+  online.turnEndsAt = null;
   ['#over', '#online', '#setup', '#lobby'].forEach(s => $(s).hidden = true);
   refreshHub(); $('#hub').hidden = false;
 }
@@ -527,51 +531,43 @@ function onlineSync(m) {
   physics.removeStick();
   clearMilk(bottles); bottles.forEach(p => p.label.material.color.set(0xffffff));
   applyGame(m.game); snapPoses(m.poses); setStickHeld();
-  state = 'remote'; renderBoard(); $('#turn').textContent = ''; $('#hint').textContent = '';
+  state = 'remote'; renderBoard();
   $('#hubBtn').hidden = online.room?.mode !== 'league';
-  renderTicker(online.room, online.fixtures, online.watching);
+  renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
   if (m.t === 'sync' && m.over) return online.view === 'watch' ? showHub() : null;
   if (m.t === 'sync' && m.turn) {
     if (m.turn.deadline != null) m.turn.endsAt = performance.now() + m.turn.deadline;
     onlineTurn(m.turn);
   }
 }
-// "Watching Bob v Cara · " while watching someone else's game
-const watchingLabel = () => online.view === 'watch' ? `Watching ${esc(game.players[0].name)} v ${esc(game.players[1].name)} · ` : '';
 function onlineTurn(m) {
   game.cur = m.cur;
   viewBottles = false; $('#viewBtn').textContent = 'Look at bottles';
   if (dragging) { dragging = false; aimLine.visible = false; }
   setStickHeld(); aimLine.visible = false; cpu = null;
-  const p = game.players[m.cur], mine = isMe(m.cur), need = game.target - p.score;
+  const mine = isMe(m.cur);
   state = mine && !m.cpu ? 'aim' : m.cpu ? 'cpu' : 'remote';
   online.turnEndsAt = state === 'aim' ? m.endsAt ?? null : null;
-  renderBoard();
-  online.turnHtml = watchingLabel() + (mine ? `<b style="color:${p.color}">Your turn</b>` : `<b style="color:${p.color}">${esc(p.name)}</b>'s turn`) + ` · ${p.score} points, ${need} to go`;
-  online.shownSecs = null;
-  $('#turn').innerHTML = online.turnHtml;
-  $('#hint').textContent = m.standIn
-    ? (mine ? 'The computer is throwing for you this turn.' : `The computer is throwing for ${p.name}.`)
-    : mine ? 'Drag down, then flick up to throw. Press left or right of centre to aim.'
-    : m.cpu ? `${p.name} is lining up…` : `Waiting for ${p.name} to throw…`;
+  renderBoard(); // the active chip shows whose turn it is
+  if (mine && m.standIn) toast('Out of time, so the computer is throwing for you', 2500, true);
+  else if (state === 'aim' && !throwTip()) toast('Your turn', 1400);
   if (m.cpu) cpu = { t: 0, aim: m.cpu.aim, target: m.cpu.target, online: true };
   if (mine && !m.cpu && !$('#hub').hidden && online.view === 'game') $('#hub').hidden = true; // your turn: back to the game
 }
-// The last seconds of your turn, before the computer throws for you
+// The last seconds of your turn, on your chip, before the computer throws for you
 function updateCountdown() {
-  if (state !== 'aim' || !online?.turnEndsAt) return;
-  const secs = Math.max(0, Math.ceil((online.turnEndsAt - performance.now()) / 1000));
-  const show = secs <= 15 ? secs : null;
-  if (show === online.shownSecs) return;
-  online.shownSecs = show;
-  $('#turn').innerHTML = online.turnHtml + (show != null ? ` · <b style="color:var(--bad)">${show}s</b>` : '');
+  const el = $('#board .chip.active .cd');
+  if (!el) return;
+  const secs = state === 'aim' && online?.turnEndsAt ? Math.max(0, Math.ceil((online.turnEndsAt - performance.now()) / 1000)) : null;
+  const text = secs != null && secs <= 15 ? `${secs}s` : '';
+  if (el.textContent !== text) el.textContent = text;
 }
 function onlineThrow(m) {
   aimLine.visible = false; cpu = null; online.turnEndsAt = null;
   online.play = m;
   scene.add(stickMesh); stickMesh.visible = true;
   state = 'flying'; flyTime = 0; landed = false; landRing.visible = false;
-  $('#hint').textContent = `${isMe(m.seat) ? 'Your throw' : game.players[m.seat].name}: ${throwText(m.dist, m.aim)}`;
+  updateCountdown();
   playFrame(0);
 }
 // Show the recording at time t (seconds), smoothing between frames.
@@ -646,6 +642,12 @@ $('#lbCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(link); toast('Link copied', 1500); } catch (e) { toast(link, 5000); }
 };
 $('#hubBtn').onclick = () => { if (online?.view === 'hub') return; peekHub(); };
+
+// Menu: Rules, League, New game / Leave game. Closes after a choice or a tap elsewhere.
+function setMenu(open) { $('#menu').hidden = !open; $('#menuBtn').setAttribute('aria-expanded', open); }
+$('#menuBtn').onclick = () => setMenu($('#menu').hidden);
+$('#menu').addEventListener('click', e => { if (e.target.closest('button')) setMenu(false); });
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.bottom')) setMenu(false); });
 $('#hubBtns').addEventListener('click', e => {
   const b = e.target.closest('button[data-act]');
   if (!b) return;

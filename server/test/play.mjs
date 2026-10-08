@@ -3,10 +3,13 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const PORT = 8099;
 const srv = spawn(process.execPath, [fileURLToPath(new URL('../index.js', import.meta.url))], {
-  env: { ...process.env, PORT: String(PORT), MILKKY_ANIM_SCALE: '0' }, stdio: ['ignore', 'pipe', 'inherit'],
+  env: { ...process.env, PORT: String(PORT), MILKKY_ANIM_SCALE: '0', MILKKY_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'milkky-test-')) }, stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise((res, rej) => { srv.stdout.once('data', res); srv.once('exit', c => rej(new Error('server exited ' + c))); });
 

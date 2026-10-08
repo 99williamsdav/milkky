@@ -66,13 +66,18 @@ body{height:100%;background:var(--sky);color:var(--ink);
   white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis;transition:opacity .25s, transform .25s}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #toast{z-index:6}
-/* Side panel on the right, so the lower centre of the screen is clear for the swing */
-.bottom{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;
-  align-items:flex-end;width:min(220px,40vw)}
-#turn{font-size:14px;background:var(--panel);border:1px solid var(--line);padding:7px 12px;border-radius:14px;text-align:right}
-#hint{font-size:12px;color:var(--ink);opacity:.75;text-align:right;background:var(--panel);padding:5px 10px;border-radius:12px;border:1px solid var(--line)}
-.btns{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-.btns button{font-size:13px;padding:7px 12px}
+/* Longer messages (tips): smaller, and allowed to wrap */
+#toast.small{font-size:15px;font-weight:600;white-space:normal;text-align:center;border-radius:16px;width:max-content;max-width:min(92vw,340px)}
+/* Turn countdown on the active player's chip */
+.chip{position:relative}
+.chip .cd{position:absolute;top:-8px;right:-6px;background:var(--bad);color:#fff;font-size:12px;font-weight:800;padding:2px 7px;border-radius:999px;font-variant-numeric:tabular-nums}
+.chip .cd:empty{display:none}
+/* Small controls in the bottom-right corner, clear of the lawn and the swing */
+.bottom{position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.btns{display:flex;gap:6px}
+.btns button,.menu button{font-size:13px;padding:7px 12px}
+.menu{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.menu[hidden]{display:none}
 button{font:inherit;font-size:14px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink);
   padding:8px 14px;border-radius:999px;cursor:pointer}
 button:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
@@ -167,13 +172,14 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
     <div class="bottom">
-      <div id="turn"></div>
-      <div id="hint">Drag down, then flick up to throw. Press left or right of centre to aim.</div>
+      <div class="menu" id="menu" hidden>
+        <button id="hubBtn" hidden>League</button>
+        <button id="helpBtn">Rules</button>
+        <button id="newBtn">New game</button>
+      </div>
       <div class="btns">
         <button id="viewBtn">Look at bottles</button>
-        <button id="helpBtn">Rules</button>
-        <button id="hubBtn" hidden>League</button>
-        <button id="newBtn">New game</button>
+        <button id="menuBtn" aria-expanded="false" aria-controls="menu">Menu</button>
       </div>
     </div>
   </div>

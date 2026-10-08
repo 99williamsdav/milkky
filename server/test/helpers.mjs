@@ -1,19 +1,26 @@
 // Shared bits for the end-to-end tests: start a real server, connect clients, count checks.
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
+// Each server gets its own empty data folder unless MILKKY_DATA_DIR is given (e.g. to restart onto saved rooms).
+export const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'milkky-test-'));
 export async function startServer(port, env = {}) {
   const srv = spawn(process.execPath, [fileURLToPath(new URL('../index.js', import.meta.url))], {
-    env: { ...process.env, PORT: String(port), MILKKY_ANIM_SCALE: '0', ...env }, stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, PORT: String(port), MILKKY_ANIM_SCALE: '0', MILKKY_DATA_DIR: tempDir(), ...env }, stdio: ['ignore', 'pipe', 'inherit'],
   });
   await new Promise((res, rej) => { srv.stdout.once('data', res); srv.once('exit', c => rej(new Error('server exited ' + c))); });
   return srv;
 }
+export const stopServer = srv => new Promise(res => { srv.once('exit', res); srv.kill(); });
 
+// srv: the server process, or a function returning the current one (for tests that restart it)
 export function checks(srv, timeoutMs = 120_000) {
   let failures = 0;
-  const done = code => { srv.kill(); process.exit(code); };
+  const done = code => { (typeof srv === 'function' ? srv() : srv).kill(); process.exit(code); };
   setTimeout(() => { console.log('FAIL timed out'); done(1); }, timeoutMs).unref();
   return {
     check(ok, what) { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures++; },
