@@ -1,22 +1,12 @@
 // Single-player league against simulated bots, saved in this browser.
-import { aiFromSkill, simulateGame } from '../shared/ai.js';
+import { aiFromSkill, simulateGame, BOT_NAMES } from '../shared/ai.js';
+import { roundRobin } from '../shared/schedule.js';
 
 const LG_KEY = 'milkky-league-v1';
-const BOT_NAMES = ['Aino', 'Eero', 'Helmi', 'Juhani', 'Kaisa', 'Lauri', 'Mikko', 'Noora', 'Onni', 'Pirkko', 'Ritva', 'Tapio', 'Veikko', 'Sanna', 'Ilmari', 'Venla'];
 
 // The human is always entry 0.
 export const lg = { league: null, lastRound: null };
 
-function roundRobin(n) {
-  let arr = [...Array(n).keys()]; const rounds = [];
-  for (let r = 0; r < n - 1; r++) {
-    const pairs = [];
-    for (let i = 0; i < n / 2; i++) pairs.push(r % 2 ? [arr[n - 1 - i], arr[i]] : [arr[i], arr[n - 1 - i]]);
-    rounds.push(pairs);
-    arr = [arr[0], arr[n - 1], ...arr.slice(1, n - 1)];
-  }
-  return rounds;
-}
 export function newLeague(season, target) {
   const names = [...BOT_NAMES].sort(() => Math.random() - 0.5).slice(0, 7);
   const skills = [0.08, 0.22, 0.38, 0.5, 0.62, 0.78, 0.92].map(v => Math.min(0.98, Math.max(0.02, v + (Math.random() - 0.5) * 0.08))).sort(() => Math.random() - 0.5); // mixed order, so the schedule isn't easiest-first

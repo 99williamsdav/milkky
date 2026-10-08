@@ -53,7 +53,8 @@ check((await B.next(is('error'))).msg === 'Only the host can start', 'only host 
 A.send({ t: 'addCpu', level: 'hard' });
 A.send({ t: 'target', target: 30 });
 const room = await A.next(m => m.t === 'room' && m.seats.length === 3 && m.target === 30);
-check(room.seats.map(s => s.name).join(',') === 'Alicescript,Bob,Computer (Hard)', `seats: ${room.seats.map(s => s.name).join(', ')}`);
+check(room.seats[0].name === 'Alicescript' && room.seats[1].name === 'Bob' && /^[A-Z][a-z]+ \(bot\)$/.test(room.seats[2].name) && room.seats[2].cpu === 'hard',
+  `seats: ${room.seats.map(s => `${s.name}${s.cpu ? ` [${s.cpu}]` : ''}`).join(', ')}`);
 
 // ---------- Game ----------
 A.send({ t: 'start' });

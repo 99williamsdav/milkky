@@ -33,7 +33,7 @@ function enter(ws, room, seat) {
   ws.room = room; ws.seat = seat;
   send(ws, { t: 'joined', code: room.code, token: seat.token, you: room.seatIndex(seat) });
   room.broadcastRoom();
-  if (room.game && room.phase === 'playing') send(ws, room.syncState());
+  room.resync(seat);
 }
 
 // Give up a seat held elsewhere (`prev` = { code, token }), e.g. when someone follows a link to another room.

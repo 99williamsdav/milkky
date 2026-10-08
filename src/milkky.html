@@ -100,11 +100,11 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #loading{font-size:16px}
 .card.wide{max-width:480px}
 .tablewrap{overflow-x:auto;margin:6px 0 14px}
-#lgTable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
-#lgTable th{font-weight:600;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}
-#lgTable td{text-align:right;padding:5px 6px;border-bottom:1px solid var(--line)}
-#lgTable th:nth-child(2),#lgTable td:nth-child(2){text-align:left;width:100%}
-#lgTable tr.me td{font-weight:800;color:var(--blue)}
+.lgtable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.lgtable th{font-weight:600;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}
+.lgtable td{text-align:right;padding:5px 6px;border-bottom:1px solid var(--line)}
+.lgtable th:nth-child(2),.lgtable td:nth-child(2){text-align:left;width:100%}
+.lgtable tr.me td{font-weight:800;color:var(--blue)}
 #lgTable .skill{color:var(--muted);font-size:11px;letter-spacing:1px;margin-left:6px;font-weight:400}
 #lgResults{font-size:14px;margin:0 0 6px}
 #lgResults div{display:flex;justify-content:space-between;gap:8px;padding:3px 0}
@@ -141,13 +141,30 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #lbAdd button{font-size:13px;padding:6px 12px}
 .count button:disabled{opacity:.6;cursor:default}
 #lbWait{color:var(--muted);margin:0 0 14px}
+#lbMode{margin-bottom:6px}
+#lbModeNote{margin:0 0 16px}
+.hud > .top{pointer-events:none}
+#ticker{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:6px;pointer-events:none}
+#ticker[hidden]{display:none}
+#ticker span{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;font-variant-numeric:tabular-nums}
+#ticker .lbl{color:var(--muted)}
+.chip .nm small{font-size:11px}
+.fixtures{display:flex;flex-direction:column;margin:0 0 8px}
+.fixtures .fx{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:14px;font-variant-numeric:tabular-nums}
+.fixtures .fx button{font-size:13px;padding:5px 12px}
+.fixtures .fx small{color:var(--muted)}
+#hubLiveWrap[hidden],#hubDoneWrap[hidden]{display:none}
+.lgtable td small{color:var(--muted);font-weight:400}
 @media (prefers-reduced-motion: reduce){ .chip,#toast{transition:none} }
 </style>
 </head>
 <body>
 <div id="app">
   <div class="hud">
-    <div id="board"></div>
+    <div class="top">
+      <div id="board"></div>
+      <div id="ticker" hidden></div>
+    </div>
     <div id="toast" role="status" aria-live="polite"></div>
     <div class="bottom">
       <div id="turn"></div>
@@ -155,6 +172,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div class="btns">
         <button id="viewBtn">Look at bottles</button>
         <button id="helpBtn">Rules</button>
+        <button id="hubBtn" hidden>League</button>
         <button id="newBtn">New game</button>
       </div>
     </div>
@@ -199,7 +217,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <p class="sub" id="lgSub"></p>
       <div id="lgResultsWrap"><div class="sectionlabel" id="lgResultsLabel"></div><div id="lgResults"></div></div>
       <div class="sectionlabel">Table</div>
-      <div class="tablewrap"><table id="lgTable"></table></div>
+      <div class="tablewrap"><table class="lgtable" id="lgTable"></table></div>
       <div id="lgNext"></div>
       <div class="row"><button class="primary" id="lgPlay">Play match</button><button id="lgMenu">Menu</button><button id="lgReset">New league</button></div>
     </div>
@@ -226,6 +244,9 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <h2 id="lbTitle">Room</h2>
       <p class="sub">Share this link or the code so others can join.</p>
       <div class="linkrow"><code id="lbLink"></code><button id="lbCopy">Copy link</button></div>
+      <div style="font-weight:600">Game</div>
+      <div class="count" id="lbMode"><button data-mode="game">Single game</button><button data-mode="league">League</button></div>
+      <p class="note" id="lbModeNote"></p>
       <div style="font-weight:600">Play to</div>
       <div class="count" id="lbTarget"><button data-t="20">20</button><button data-t="30">30</button><button data-t="50">50</button></div>
       <div style="font-weight:600;margin-bottom:6px">Players</div>
@@ -233,6 +254,18 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div class="row" id="lbAdd"><span>Add computer:</span><button data-level="easy">Easy</button><button data-level="medium">Medium</button><button data-level="hard">Hard</button></div>
       <p id="lbWait"></p>
       <div class="row"><button class="primary" id="lbStart">Start game</button><button id="lbLeave">Leave room</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="hub" hidden>
+    <div class="card wide">
+      <h2 id="hubTitle"></h2>
+      <p class="sub" id="hubSub"></p>
+      <div id="hubLiveWrap"><div class="sectionlabel">Live games</div><div class="fixtures" id="hubLive"></div></div>
+      <div id="hubDoneWrap"><div class="sectionlabel" id="hubDoneLabel">Results</div><div class="fixtures" id="hubDone"></div></div>
+      <div class="sectionlabel">Table</div>
+      <div class="tablewrap"><table class="lgtable" id="hubTable"></table></div>
+      <div class="row" id="hubBtns"></div>
     </div>
   </div>
 

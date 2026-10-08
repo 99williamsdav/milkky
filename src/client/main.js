@@ -10,6 +10,7 @@ import { decorateBottles, stickMesh, hand, aimGeo, aimLine, landRing } from './m
 import { clearMilk, updateMilk } from './milk.js';
 import * as League from './league.js';
 import { createNet, savedRoom } from './net.js';
+import { renderHub, renderTicker, myFixture, esc } from './hub.js';
 
 const $ = s => document.querySelector(s);
 let RAPIER;
@@ -39,8 +40,8 @@ let lastSetup = slots.slice();
 let chosenTarget = 50; // the score to hit exactly; going over drops you to half
 let mode = 'quick', leagueMatch = null; // quick | league | online
 
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[c]);
-const isMe = i => mode === 'online' && online && i === online.seat;
+// Online, whether player i of the game on screen is us
+const isMe = i => mode === 'online' && !!online && game.players[i]?.seat === online.seat;
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -83,7 +84,7 @@ function beginTurn() {
 function renderBoard() {
   $('#board').innerHTML = game.players.map((p, i) => `
     <div class="chip ${i === game.cur && state !== 'over' ? 'active' : ''} ${p.out ? 'out' : ''}">
-      <div class="nm"><span class="sw" style="background:${p.color}"></span>${esc(p.name)}${isMe(i) ? ' (you)' : ''}</div>
+      <div class="nm"><span class="sw" style="background:${p.color}"></span>${esc(p.name)}${isMe(i) ? ' (you)' : ''}${p.left ? '<small>· computer</small>' : p.away ? '<small>· away</small>' : ''}</div>
       <div class="sc">${p.score}<small>/${game.target}</small></div>
       <div class="dots">${[0, 1, 2].map(k => `<i class="${k < p.misses ? 'on' : ''}"></i>`).join('')}</div>
     </div>`).join('');
@@ -273,18 +274,21 @@ function finishLeagueMatch() {
 League.loadLeague();
 
 // ---------- Online play ----------
-// The server owns the game. Messages that change the scene wait in a queue while a throw is
-// being animated, so everyone sees each throw play out in order.
-// online: { seat, room, view: 'entry' | 'lobby' | 'game' | 'over', queue, play, pending, overQueued }
+// The server owns the game. Messages that change the scene wait in a queue while a throw is being
+// animated, so everyone sees each throw play out in order. Each game is a "match"; a league round has
+// several at once, so we show one (our own, or one we're watching) and ignore the others' messages.
+// online.view: entry | lobby | game (our match) | watch (someone else's) | hub (league screen) | over
 let online = null, net = null;
 const ANIMATING = ['flying', 'scoring', 'restand'];
 const STICK_BODY = 12; // body index the server uses for the stick
 const NAME_KEY = 'milkky-name';
+const GAME_MESSAGES = new Set(['start', 'sync', 'turn', 'throw', 'aim', 'status']);
 
 function enterOnline() {
   mode = 'online'; leagueMatch = null; cpu = null; aimLine.visible = false; tween = null;
   physics.removeStick(); resetBottles(); state = 'menu';
-  online = { seat: -1, room: null, view: 'entry', queue: [], play: null, pending: null, overQueued: false };
+  online = { seat: -1, room: null, view: 'entry', queue: [], play: null, pending: null, overQueued: false,
+    myMatch: null, watching: null, fixtures: null, turnEndsAt: null, nextRoundAt: null };
   if (!net) net = createNet(onNet, onNetStatus);
   $('#newBtn').textContent = 'Leave game';
 }
@@ -293,7 +297,8 @@ function leaveOnline() {
   online = null; mode = 'quick'; cpu = null; aimLine.visible = false; tween = null; physicsOn = true;
   physics.removeStick(); resetBottles(); setStickHeld(); state = 'menu';
   $('#newBtn').textContent = 'New game'; $('#board').innerHTML = ''; $('#turn').textContent = '';
-  ['#online', '#lobby', '#over'].forEach(s => $(s).hidden = true);
+  $('#ticker').hidden = true; $('#hubBtn').hidden = true;
+  ['#online', '#lobby', '#over', '#hub'].forEach(s => $(s).hidden = true);
   $('#setup').hidden = false;
   setRoomParam(null);
 }
@@ -344,34 +349,75 @@ function connect(first) {
 
 function onNet(m) {
   if (!online) return;
+  if (GAME_MESSAGES.has(m.t)) return onGameMessage(m);
   switch (m.t) {
     case 'joined':
       online.seat = m.you; online.queue.length = 0; setRoomParam(m.code);
       $('#online').hidden = true;
       if (online.view === 'entry') online.view = 'lobby';
       return;
-    case 'room':
-      online.room = m; online.seat = m.you;
-      if (m.phase === 'playing') return; // start/sync messages take it from here
-      // The game ended while we were disconnected: back to the room.
-      if (online.view === 'game' && !online.overQueued && !ANIMATING.includes(state)) return showLobby();
-      if (online.view === 'lobby') showLobby();
+    case 'room': return onRoom(m);
+    case 'fixtures': // live scores during a league round
+      online.fixtures = m.fixtures;
+      renderTicker(online.room, online.fixtures, online.watching);
+      if (!$('#hub').hidden) refreshHub();
       return;
     case 'error':
       if (m.code === 'gone') { leaveOnline(); return toast('That game has ended', 2500); }
       if (online.view === 'entry') { $('#onErr').textContent = m.msg; setEntryBusy(false); return; }
       if (state === 'sent') { state = 'aim'; setStickHeld(); }
       return toast(m.msg, 2500);
-    case 'aim': // someone else lining up
+  }
+}
+function onGameMessage(m) {
+  if (m.t === 'start' || m.t === 'sync') {
+    // Our own match (a new round, or catching up after rejoining), or one we asked to watch
+    const mine = m.t === 'start' || m.game.players.some(p => p.seat === online.seat);
+    if (mine) online.myMatch = m.match;
+    else if (m.match !== online.watching) return; // a game we've since stopped watching
+    online.watching = m.match; online.queue.length = 0;
+    return onlineSync(m);
+  }
+  if (m.match !== online.watching) return;
+  switch (m.t) {
+    case 'aim': // the thrower lining up
       if (state === 'remote') { updateAimLine(m.aim); aimLine.visible = m.pull !== 0 || m.aim !== 0; setStickHeld(m.pull, m.aim); }
       return;
+    case 'status': // someone dropped, came back, or left
+      m.game.players.forEach((p, i) => { if (game.players[i]) Object.assign(game.players[i], { away: p.away, left: p.left }); });
+      return renderBoard();
+    case 'turn':
+      if (m.deadline != null) m.endsAt = performance.now() + m.deadline; // time left counts from now, not when it's shown
+      online.queue.push(m); break;
     case 'throw':
       if (m.over) online.overQueued = true;
       online.queue.push(m); break;
-    default: // start, sync, turn
-      online.queue.push(m);
   }
   if (renderingStopped()) catchUp();
+}
+function onRoom(m) {
+  online.room = m; online.seat = m.you;
+  if (m.fixtures) online.fixtures = m.fixtures;
+  if (m.league?.nextRoundIn != null) online.nextRoundAt = performance.now() + m.league.nextRoundIn;
+  $('#hubBtn').hidden = m.mode !== 'league' || !m.league || m.phase === 'lobby' || online.view === 'lobby';
+  renderTicker(m, online.fixtures, online.watching);
+  const v = online.view, idle = !ANIMATING.includes(state) && !online.queue.length && !online.overQueued;
+  if (v === 'lobby') {
+    // A league round starting with our game in it: the start message takes over.
+    const mine = myFixture(m.fixtures, m.you);
+    if (m.mode === 'league' && m.phase !== 'lobby' && m.phase !== 'over' && !(mine && !mine.over)) return showHub();
+    if (m.phase !== 'playing') showLobby();
+    return;
+  }
+  if (!$('#hub').hidden) refreshHub();
+  if (m.mode === 'game') {
+    // The game ended while we were disconnected: back to the room.
+    if (m.phase !== 'playing' && v === 'game' && idle) showLobby();
+    return;
+  }
+  // League: our game (or the one we were watching) finished while we were away
+  const shown = (m.fixtures || []).find(f => f.id === online.watching);
+  if ((v === 'game' || v === 'watch') && idle && (m.phase !== 'playing' || !shown || shown.over)) showHub();
 }
 function onNetStatus(s) {
   if (!online) return;
@@ -386,33 +432,63 @@ function onNetStatus(s) {
 // Lobby
 function showLobby() {
   online.view = 'lobby'; online.overQueued = false; state = 'menu';
-  ['#over', '#online', '#setup'].forEach(s => $(s).hidden = true);
+  ['#over', '#online', '#setup', '#hub'].forEach(s => $(s).hidden = true);
+  $('#hubBtn').hidden = true;
   renderLobby(); $('#lobby').hidden = false;
 }
 function renderLobby() {
   const r = online.room;
   if (!r) return;
-  const host = r.you === r.host;
+  const host = r.you === r.host, league = r.mode === 'league', n = r.seats.length;
   $('#lbTitle').textContent = `Room ${r.code}`;
   $('#lbLink').textContent = shareLink(r.code);
+  $('#lbMode').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.mode === r.mode); b.disabled = !host; });
+  const rounds = n + (n % 2) - 1;
+  $('#lbModeNote').textContent = league
+    ? `Everyone plays everyone once. Each round's games are played at the same time, and you can watch the others when yours is done.${n >= 2 ? ` ${n} players: ${rounds} round${rounds > 1 ? 's' : ''}.` : ''}`
+    : '';
   $('#lbTarget').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', +b.dataset.t === r.target); b.disabled = !host; });
   $('#lbSeats').innerHTML = r.seats.map((s, i) => `
     <div class="slot ${s.connected ? '' : 'away'}"><span><i class="sw" style="background:${s.color}"></i>${esc(s.name)}
-      ${i === r.you ? '<small>(you)</small>' : ''}${i === r.host ? '<small>· host</small>' : ''}${s.connected ? '' : '<small>· away</small>'}</span>
+      ${i === r.you ? '<small>(you)</small>' : ''}${i === r.host ? '<small>· host</small>' : ''}${s.cpu ? `<small>· ${s.cpu}</small>` : ''}${s.connected ? '' : '<small>· away</small>'}</span>
       ${host && s.cpu ? `<button data-rm="${i}" aria-label="Remove ${esc(s.name)}">Remove</button>` : ''}</div>`).join('');
-  $('#lbAdd').hidden = !host || r.seats.length >= 4;
+  $('#lbAdd').hidden = !host || n >= r.maxSeats;
   $('#lbStart').hidden = !host;
-  $('#lbStart').disabled = r.seats.length < 2;
-  $('#lbWait').textContent = !host ? 'Waiting for the host to start the game.'
-    : r.seats.length < 2 ? 'Share the link, or add a computer player, to start.' : '';
+  $('#lbStart').textContent = league ? 'Start league' : 'Start game';
+  $('#lbStart').disabled = n < 2;
+  $('#lbWait').textContent = !host ? `Waiting for the host to start the ${league ? 'league' : 'game'}.`
+    : n < 2 ? 'Share the link, or add a computer player, to start.' : '';
+}
+
+// League screen. As the main view (between our games), or peeked at over the game we're playing or watching.
+function showHub() {
+  online.view = 'hub'; online.overQueued = false; state = 'menu'; cpu = null; aimLine.visible = false;
+  online.turnEndsAt = null; $('#turn').textContent = ''; $('#hint').textContent = '';
+  ['#over', '#online', '#setup', '#lobby'].forEach(s => $(s).hidden = true);
+  refreshHub(); $('#hub').hidden = false;
+}
+function peekHub() { refreshHub(); $('#hub').hidden = false; }
+function refreshHub() {
+  if (!online?.room?.league) return;
+  const secsToNext = online.room.phase === 'between' && online.nextRoundAt ? Math.max(0, Math.ceil((online.nextRoundAt - performance.now()) / 1000)) : null;
+  renderHub({ room: online.room, fixtures: online.fixtures, you: online.seat, view: online.view, watching: online.watching, secsToNext });
+}
+// Once a second: the countdown to the next round, and to the end of your turn (also when not drawing frames)
+setInterval(() => {
+  if (online?.room?.phase === 'between' && !$('#hub').hidden) refreshHub();
+  if (online) updateCountdown();
+}, 1000);
+function watchMatch(id) {
+  online.watching = id; online.queue.length = 0;
+  net.send({ t: 'watch', match: id }); // the server replies with the game as it stands
+  $('#hub').hidden = true;
 }
 
 // Game
 function pumpOnline() {
   while (online.queue.length && !ANIMATING.includes(state)) {
     const m = online.queue.shift();
-    if (m.t === 'start' || m.t === 'sync') onlineSync(m);
-    else if (m.t === 'turn') onlineTurn(m);
+    if (m.t === 'turn') onlineTurn(m);
     else if (m.t === 'throw') onlineThrow(m);
   }
 }
@@ -442,30 +518,56 @@ function snapPoses(poses) {
     p.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
   });
 }
-// A new game, or catching up after rejoining: draw the game as the server has it.
+// A new game, catching up after rejoining, or starting to watch one: draw it as the server has it.
 function onlineSync(m) {
-  ['#lobby', '#over', '#online', '#setup', '#league'].forEach(s => $(s).hidden = true);
-  online.view = 'game'; online.play = online.pending = null; online.overQueued = false;
-  tween = null; cpu = null; aimLine.visible = false; landRing.visible = false;
+  ['#lobby', '#over', '#online', '#setup', '#league', '#hub'].forEach(s => $(s).hidden = true);
+  online.view = m.match === online.myMatch ? 'game' : 'watch';
+  online.play = online.pending = null; online.overQueued = false; online.turnEndsAt = null;
+  tween = null; cpu = null; aimLine.visible = false; landRing.visible = false; dragging = false;
+  physics.removeStick();
   clearMilk(bottles); bottles.forEach(p => p.label.material.color.set(0xffffff));
   applyGame(m.game); snapPoses(m.poses); setStickHeld();
-  state = 'remote'; renderBoard(); $('#turn').textContent = '';
-  if (m.t === 'sync' && m.turn) onlineTurn(m.turn);
+  state = 'remote'; renderBoard(); $('#turn').textContent = ''; $('#hint').textContent = '';
+  $('#hubBtn').hidden = online.room?.mode !== 'league';
+  renderTicker(online.room, online.fixtures, online.watching);
+  if (m.t === 'sync' && m.over) return online.view === 'watch' ? showHub() : null;
+  if (m.t === 'sync' && m.turn) {
+    if (m.turn.deadline != null) m.turn.endsAt = performance.now() + m.turn.deadline;
+    onlineTurn(m.turn);
+  }
 }
+// "Watching Bob v Cara · " while watching someone else's game
+const watchingLabel = () => online.view === 'watch' ? `Watching ${esc(game.players[0].name)} v ${esc(game.players[1].name)} · ` : '';
 function onlineTurn(m) {
   game.cur = m.cur;
   viewBottles = false; $('#viewBtn').textContent = 'Look at bottles';
+  if (dragging) { dragging = false; aimLine.visible = false; }
   setStickHeld(); aimLine.visible = false; cpu = null;
   const p = game.players[m.cur], mine = isMe(m.cur), need = game.target - p.score;
-  state = mine ? 'aim' : m.cpu ? 'cpu' : 'remote';
+  state = mine && !m.cpu ? 'aim' : m.cpu ? 'cpu' : 'remote';
+  online.turnEndsAt = state === 'aim' ? m.endsAt ?? null : null;
   renderBoard();
-  $('#turn').innerHTML = (mine ? `<b style="color:${p.color}">Your turn</b>` : `<b style="color:${p.color}">${esc(p.name)}</b>'s turn`) + ` · ${p.score} points, ${need} to go`;
-  $('#hint').textContent = mine ? 'Drag down, then flick up to throw. Press left or right of centre to aim.'
+  online.turnHtml = watchingLabel() + (mine ? `<b style="color:${p.color}">Your turn</b>` : `<b style="color:${p.color}">${esc(p.name)}</b>'s turn`) + ` · ${p.score} points, ${need} to go`;
+  online.shownSecs = null;
+  $('#turn').innerHTML = online.turnHtml;
+  $('#hint').textContent = m.standIn
+    ? (mine ? 'The computer is throwing for you this turn.' : `The computer is throwing for ${p.name}.`)
+    : mine ? 'Drag down, then flick up to throw. Press left or right of centre to aim.'
     : m.cpu ? `${p.name} is lining up…` : `Waiting for ${p.name} to throw…`;
   if (m.cpu) cpu = { t: 0, aim: m.cpu.aim, target: m.cpu.target, online: true };
+  if (mine && !m.cpu && !$('#hub').hidden && online.view === 'game') $('#hub').hidden = true; // your turn: back to the game
+}
+// The last seconds of your turn, before the computer throws for you
+function updateCountdown() {
+  if (state !== 'aim' || !online?.turnEndsAt) return;
+  const secs = Math.max(0, Math.ceil((online.turnEndsAt - performance.now()) / 1000));
+  const show = secs <= 15 ? secs : null;
+  if (show === online.shownSecs) return;
+  online.shownSecs = show;
+  $('#turn').innerHTML = online.turnHtml + (show != null ? ` · <b style="color:var(--bad)">${show}s</b>` : '');
 }
 function onlineThrow(m) {
-  aimLine.visible = false; cpu = null;
+  aimLine.visible = false; cpu = null; online.turnEndsAt = null;
   online.play = m;
   scene.add(stickMesh); stickMesh.visible = true;
   state = 'flying'; flyTime = 0; landed = false; landRing.visible = false;
@@ -515,7 +617,7 @@ function finishOnlineThrow() {
   const m = online.pending;
   online.pending = null;
   snapPoses(m.poses);
-  if (m.over) return showOver();
+  if (m.over) return online.room?.mode === 'league' ? showHub() : showOver();
   game.cur = m.game.cur;
   state = 'remote'; // the next turn message is already queued
 }
@@ -533,6 +635,7 @@ $('#onBack').onclick = () => {
   if (savedRoom()) { $('#online').hidden = true; enterOnline(); net.resume(); return; } // back to the game we came from
   if (mode === 'online') leaveOnline(); else { $('#online').hidden = true; $('#setup').hidden = false; }
 };
+$('#lbMode').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'mode', mode: b.dataset.mode }); });
 $('#lbTarget').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'target', target: +b.dataset.t }); });
 $('#lbAdd').addEventListener('click', e => { const b = e.target.closest('button'); if (b) net.send({ t: 'addCpu', level: b.dataset.level }); });
 $('#lbSeats').addEventListener('click', e => { const b = e.target.closest('button[data-rm]'); if (b) net.send({ t: 'removeCpu', seat: +b.dataset.rm }); });
@@ -542,6 +645,17 @@ $('#lbCopy').onclick = async () => {
   const link = shareLink(online.room.code);
   try { await navigator.clipboard.writeText(link); toast('Link copied', 1500); } catch (e) { toast(link, 5000); }
 };
+$('#hubBtn').onclick = () => { if (online?.view === 'hub') return; peekHub(); };
+$('#hubBtns').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'back') $('#hub').hidden = true;
+  else if (act === 'next') net.send({ t: 'next' });
+  else if (act === 'room') showLobby();
+  else if (act === 'leave') { if (online.room.phase === 'over' || confirm('Leave the league? The computer will play your remaining games.')) leaveOnline(); }
+});
+$('#hubLive').addEventListener('click', e => { const b = e.target.closest('button[data-act="watch"]'); if (b) watchMatch(b.dataset.match); });
 
 // ---------- Camera ----------
 const THROW_POS = V(0, 1.1, 0.9), THROW_LOOK = V(0, 0.05, -3.0);
@@ -578,7 +692,7 @@ const tq = new THREE.Quaternion(), tv = new THREE.Vector3(), IDQ = new THREE.Qua
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now; lastFrameAt = now;
   if (physicsOn && mode !== 'online') physics.advance(dt);
-  if (mode === 'online' && online) pumpOnline();
+  if (mode === 'online' && online) { pumpOnline(); updateCountdown(); }
   if (state === 'cpu' && cpu) cpuTick(dt);
   if (state === 'flying') {
     flyTime += dt;

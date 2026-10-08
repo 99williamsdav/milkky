@@ -1,50 +1,56 @@
-// A room: up to four seats (people or computer players), a lobby, and one game at a time.
-// The room owns the physics world, so every throw is simulated here and only the result is sent out.
+// A room: a lobby of seats (people or computer players), then either a single game or a league.
+// League: everyone plays everyone once, a round at a time, with each round's fixtures played at the same
+// time. A filler computer player evens the numbers; anyone who leaves is played by the computer.
 import { randomUUID } from 'node:crypto';
-import { createPhysics } from '../src/shared/physics.js';
-import { newPlayer, scoreThrow, isGameOver, advanceTurn, planRestand } from '../src/shared/rules.js';
-import { LEVELS, computeInfo, planCpuThrow } from '../src/shared/ai.js';
-import { COLORS, AIM_LIMIT, MIN_DIST, MAX_DIST, clamp } from '../src/shared/constants.js';
-import { mulberry32 } from '../src/shared/rng.js';
-import { simulateThrow, snapshot, settle } from './sim.js';
+import { LEVELS, BOT_NAMES } from '../src/shared/ai.js';
+import { roundRobin } from '../src/shared/schedule.js';
+import { Match } from './match.js';
 
-export const MAX_SEATS = 4;
+const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[name] : fallback);
+export const MAX_SEATS = { game: 4, league: 8 };
 const TARGETS = [20, 30, 50];
 const CPU_LEVELS = Object.keys(LEVELS);
-const LEVEL_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
-// How long clients spend animating, in seconds; matches the local game. MILKKY_ANIM_SCALE=0 skips waits in tests.
-const ANIM_SCALE = process.env.MILKKY_ANIM_SCALE !== undefined ? +process.env.MILKKY_ANIM_SCALE : 1;
-const SCORE_PAUSE = 1.3, RESTAND = 0.5, CPU_WINDUP = 1.95;
-const EARLY_GRACE = 300; // ms: accept a throw slightly before we expect the thrower's animation to finish
+const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
 const LOBBY_GRACE = 60_000; // ms a disconnected player keeps their lobby seat, so a refresh doesn't lose it
+const BETWEEN_ROUNDS = env('MILKKY_BETWEEN_SECONDS', 20) * 1000;
 
 export const cleanName = s => String(s ?? '').replace(/[\u0000-\u001f<>&"'`]/g, '').trim().slice(0, 16);
-const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+// Computer players are "Aino (bot)"; people can't give themselves that suffix.
+const BOT_SUFFIX = ' (bot)';
+const humanName = s => cleanName(s).replace(/\s*\(\s*bot\s*\)\s*$/i, '').trim();
 
 export class Room {
   constructor(code, RAPIER) {
-    this.code = code;
-    this.seats = [];        // { name, cpu: level | null, token, ws, connected }
-    this.phase = 'lobby';   // lobby → playing → over (→ playing again)
+    this.code = code; this.RAPIER = RAPIER;
+    this.seats = [];        // { name, cpu: level | null, token, ws, connected, awaySince, left }
+    this.mode = 'game';     // game | league
+    // game: lobby → playing → over.  league: lobby → playing ⇄ between → over.  Both can start again from over.
+    this.phase = 'lobby';
     this.target = 50;
-    this.physics = createPhysics(RAPIER);
-    this.game = null;
-    this.rng = Math.random;
-    this.busyUntil = 0;
-    this.cpuTimer = null;
+    this.matches = [];      // the game, or this league round's fixtures
+    this.league = null;
+    this.timer = null;
     this.emptySince = null;
   }
 
   // ---------- Seats ----------
   get host() { return this.seats.findIndex(s => !s.cpu && s.connected); }
-  canJoin() { return this.phase !== 'playing' && this.seats.length < MAX_SEATS; }
+  get inProgress() { return this.phase === 'playing' || this.phase === 'between'; }
+  canJoin() { return !this.inProgress && this.seats.length < MAX_SEATS[this.mode]; }
   uniqueName(name) {
     let n = name, k = 2;
     while (this.seats.some(s => s.name === n)) n = `${name} ${k++}`;
     return n;
   }
+  // A Finnish name not already used in this room (or by this league's filler)
+  botName() {
+    const seats = [...this.seats, ...(this.league?.entries.map(e => e.seat) || [])];
+    const taken = new Set(seats.map(s => s.name.replace(BOT_SUFFIX, '')));
+    const free = BOT_NAMES.filter(n => !taken.has(n));
+    return this.uniqueName((free.length ? free[(Math.random() * free.length) | 0] : 'Bot') + BOT_SUFFIX);
+  }
   addHuman(ws, name) {
-    const seat = { name: this.uniqueName(cleanName(name) || 'Player'), cpu: null, token: randomUUID(), ws, connected: true };
+    const seat = { name: this.uniqueName(humanName(name) || 'Player'), cpu: null, token: randomUUID(), ws, connected: true };
     this.seats.push(seat);
     this.emptySince = null;
     return seat;
@@ -53,15 +59,20 @@ export class Room {
     if (seat.ws && seat.ws !== ws) seat.ws.close(4000, 'Joined from another tab');
     clearTimeout(seat.dropTimer);
     seat.ws = ws; seat.connected = true; this.emptySince = null;
+    this.matches.forEach(m => m.seatChanged(seat));
   }
   // `left`: the player chose to go (or moved to another room), rather than losing the connection.
   disconnect(seat, { left = false } = {}) {
-    seat.ws = null; seat.connected = false;
-    // During a game the seat is kept so the player can rejoin. Outside one, a player who left goes
-    // straight away; a dropped connection (e.g. a page refresh) keeps the seat for a while first.
-    if (this.phase !== 'playing') {
-      if (left) this.removeSeat(seat);
-      else seat.dropTimer = setTimeout(() => { if (!seat.connected && this.phase !== 'playing') { this.removeSeat(seat); this.broadcastRoom(); } }, LOBBY_GRACE);
+    seat.ws = null; seat.connected = false; seat.awaySince = Date.now();
+    if (left) seat.left = true;
+    this.matches.forEach(m => m.spectators.delete(seat));
+    if (this.inProgress) {
+      // Keep the seat: they can rejoin, and the computer plays their turns meanwhile (or from now on, if they left).
+      this.matches.forEach(m => m.seatChanged(seat));
+    } else if (left) {
+      this.removeSeat(seat);
+    } else { // e.g. a page refresh in the lobby
+      seat.dropTimer = setTimeout(() => { if (!seat.connected && !this.inProgress) { this.removeSeat(seat); this.broadcastRoom(); } }, LOBBY_GRACE);
     }
     if (!this.seats.some(s => !s.cpu && s.connected)) this.emptySince = Date.now();
     this.broadcastRoom();
@@ -71,72 +82,110 @@ export class Room {
     const i = this.seats.indexOf(seat);
     if (i >= 0) this.seats.splice(i, 1);
   }
+  // People who aren't connected don't keep their seat into the next game.
+  dropAbsentSeats() { for (const s of this.seats.filter(s => !s.cpu && !s.connected)) this.removeSeat(s); }
   seatIndex(seat) { return this.seats.indexOf(seat); }
+  // The match this seat is playing in (an unfinished one first)
+  matchOf(seat) { return this.matches.find(m => !m.over && m.seats.includes(seat)) || this.matches.find(m => m.seats.includes(seat)); }
 
   // ---------- Messages ----------
   send(seat, msg) {
     if (seat.ws && seat.ws.readyState === 1) seat.ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
-  broadcast(msg, except = null) {
+  broadcast(msg) {
     const s = JSON.stringify(msg);
-    for (const seat of this.seats) if (seat !== except) this.send(seat, s);
+    for (const seat of this.seats) this.send(seat, s);
+  }
+  // Live state of each fixture, for the scores strip and the "watch a game" list
+  fixtures() {
+    return this.matches.map(m => ({
+      id: m.id, over: m.over, cur: m.game.cur, winner: m.game.winner ? m.game.players.indexOf(m.game.winner) : -1,
+      seats: m.seats.map(s => this.seatIndex(s)),
+      players: m.game.players.map(p => ({ name: p.name, score: p.score, out: p.out })),
+    }));
+  }
+  leagueState() {
+    const lg = this.league;
+    if (!lg) return null;
+    const table = lg.entries.map(e => ({
+      name: e.seat.name, seat: this.seatIndex(e.seat), cpu: e.seat.cpu, left: !!e.seat.left,
+      P: e.P, W: e.W, L: e.L, PF: e.PF, PA: e.PA,
+    })).sort((a, b) => b.W - a.W || (b.PF - b.PA) - (a.PF - a.PA) || b.PF - a.PF);
+    return {
+      round: lg.round + 1, rounds: lg.schedule.length, table, results: lg.results,
+      nextRoundIn: this.phase === 'between' ? Math.max(0, this.nextRoundAt - Date.now()) : null,
+    };
   }
   roomState(forSeat) {
     return {
-      t: 'room', code: this.code, phase: this.phase, target: this.target, host: this.host,
-      you: this.seatIndex(forSeat),
-      seats: this.seats.map((s, i) => ({ name: s.name, cpu: s.cpu, color: COLORS[i], connected: s.connected })),
+      t: 'room', code: this.code, mode: this.mode, phase: this.phase, target: this.target, host: this.host,
+      you: this.seatIndex(forSeat), maxSeats: MAX_SEATS[this.mode],
+      seats: this.seats.map((s, i) => ({ name: s.name, cpu: s.cpu, color: SEAT_COLORS[i], connected: s.connected, left: !!s.left })),
+      league: this.leagueState(),
+      fixtures: this.mode === 'league' ? this.fixtures() : null,
     };
   }
   broadcastRoom() { for (const seat of this.seats) this.send(seat, this.roomState(seat)); }
-  publicGame() {
-    const g = this.game;
-    return {
-      cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
-      players: g.players.map(p => ({ name: p.name, cpu: p.cpu, color: p.color, score: p.score, misses: p.misses, out: p.out })),
-    };
+  // After (re)joining: the game this seat is in, as it stands now
+  resync(seat) {
+    const m = this.inProgress && this.matchOf(seat);
+    if (m && !m.over) this.send(seat, m.syncState());
   }
-  // Everything a (re)joining client needs to draw the game as it stands
-  syncState() {
-    return { t: 'sync', game: this.publicGame(), poses: snapshot(this.physics), phase: this.phase, turn: this.turnInfo };
+  // Called by a match after every throw
+  matchUpdated() {
+    if (this.mode === 'league') this.broadcast({ t: 'fixtures', fixtures: this.fixtures() });
   }
 
   // ---------- Handling a seat's message ----------
   handle(seat, m) {
     const isHost = this.seatIndex(seat) === this.host;
+    // Lobby settings: host only, and not while a game or league is running. Returns true if refused.
+    const lobbyOnly = what => {
+      if (isHost && !this.inProgress) return false;
+      this.error(seat, `Only the host can ${what}, between games`);
+      return true;
+    };
     switch (m.t) {
+      case 'mode':
+        if (lobbyOnly('change the game type')) return;
+        if (!(m.mode in MAX_SEATS)) return this.error(seat, 'Unknown game type');
+        if (this.seats.length > MAX_SEATS[m.mode]) return this.error(seat, `A single game is for up to ${MAX_SEATS[m.mode]} players`);
+        this.mode = m.mode; return this.broadcastRoom();
       case 'target':
-        if (!isHost || this.phase === 'playing') return this.error(seat, 'Only the host can change the target before a game');
+        if (lobbyOnly('change the target')) return;
         if (!TARGETS.includes(m.target)) return this.error(seat, 'Target must be 20, 30 or 50');
         this.target = m.target; return this.broadcastRoom();
       case 'addCpu':
-        if (!isHost || this.phase === 'playing') return this.error(seat, 'Only the host can add players before a game');
+        if (lobbyOnly('add players')) return;
         if (!CPU_LEVELS.includes(m.level)) return this.error(seat, 'Unknown level');
-        if (this.seats.length >= MAX_SEATS) return this.error(seat, 'The room is full');
-        this.seats.push({ name: this.uniqueName(`Computer (${LEVEL_LABEL[m.level]})`), cpu: m.level, token: null, ws: null, connected: true });
+        if (this.seats.length >= MAX_SEATS[this.mode]) return this.error(seat, 'The room is full');
+        this.seats.push({ name: this.botName(), cpu: m.level, token: null, ws: null, connected: true });
         return this.broadcastRoom();
       case 'removeCpu': {
         const s = this.seats[m.seat];
-        if (!isHost || this.phase === 'playing' || !s || !s.cpu) return this.error(seat, 'Can’t remove that player');
-        this.seats.splice(m.seat, 1); return this.broadcastRoom();
+        if (lobbyOnly('remove players')) return;
+        if (!s || !s.cpu) return this.error(seat, 'Can’t remove that player');
+        this.removeSeat(s); return this.broadcastRoom();
       }
       case 'start':
         if (!isHost) return this.error(seat, 'Only the host can start');
-        if (this.phase === 'playing') return this.error(seat, 'A game is already running');
-        return this.start();
-      case 'aim': { // live preview of the thrower lining up; not trusted for anything
-        if (this.phase !== 'playing' || this.seatIndex(seat) !== this.game.cur) return;
-        const aim = num(m.aim), pull = num(m.pull);
-        if (aim === null || pull === null) return;
-        return this.broadcast({ t: 'aim', aim: clamp(aim, -AIM_LIMIT, AIM_LIMIT), pull: clamp(pull, -0.4, 1) }, seat);
+        if (this.inProgress) return this.error(seat, 'A game is already running');
+        return this.start(seat);
+      case 'next': // host skips the wait between league rounds
+        if (!isHost || this.phase !== 'between') return;
+        return this.startRound();
+      case 'watch': { // watch another fixture, or stop watching (match: null)
+        this.matches.forEach(x => x.spectators.delete(seat));
+        const target = this.matches.find(x => x.id === m.match);
+        if (!target || target.seats.includes(seat)) return;
+        target.spectators.add(seat);
+        return this.send(seat, target.syncState());
       }
+      case 'aim': return this.matchOf(seat)?.aim(seat, m);
       case 'throw': {
-        if (this.phase !== 'playing') return this.error(seat, 'No game running');
-        if (this.seatIndex(seat) !== this.game.cur) return this.error(seat, 'Not your turn');
-        if (Date.now() < this.busyUntil - EARLY_GRACE) return this.error(seat, 'Wait for the last throw to finish');
-        const dist = num(m.dist), aim = num(m.aim);
-        if (dist === null || aim === null) return this.error(seat, 'Bad throw');
-        return this.doThrow(clamp(dist, MIN_DIST, MAX_DIST), clamp(aim, -AIM_LIMIT, AIM_LIMIT));
+        const match = this.inProgress && this.matchOf(seat);
+        const err = match ? match.throw(seat, m) : 'No game running';
+        return err && this.error(seat, err);
       }
       default:
         return this.error(seat, `Unknown message ${String(m.t).slice(0, 20)}`);
@@ -145,62 +194,65 @@ export class Room {
   error(seat, msg) { this.send(seat, { t: 'error', msg }); }
 
   // ---------- Game flow ----------
-  start() {
-    clearTimeout(this.cpuTimer);
+  start(seat) {
     this.dropAbsentSeats(); // anyone still away from the lobby doesn't play
-    const seed = (Math.random() * 2 ** 32) >>> 0;
-    this.rng = mulberry32(seed);
-    this.physics.removeStick(); this.physics.resetBottles(); settle(this.physics);
-    this.game = {
-      players: this.seats.map((s, i) => newPlayer(s.name, s.cpu ? LEVELS[s.cpu] : null, COLORS[i])),
-      cur: 0, target: this.target, winner: null,
-    };
-    this.phase = 'playing'; this.busyUntil = 0;
+    if (this.mode === 'league' && this.seats.length < 2) return this.error(seat, 'A league needs at least 2 players');
+    this.seats.forEach(s => { s.left = false; });
+    this.disposeMatches(); clearTimeout(this.timer);
+    if (this.mode === 'league') return this.startLeague();
+    this.league = null;
+    this.phase = 'playing';
+    this.matches = [new Match(this, 'game', [...this.seats], { target: this.target, onOver: () => this.gameOver() })];
     this.broadcastRoom();
-    this.broadcast({ t: 'start', game: this.publicGame(), poses: snapshot(this.physics) });
-    this.beginTurn(0);
+    this.matches[0].start();
   }
-  // `delay`: seconds until clients have finished animating the previous throw
-  beginTurn(delay) {
-    const p = this.game.players[this.game.cur];
-    this.turnInfo = { cur: this.game.cur };
-    if (p.cpu) {
-      const plan = planCpuThrow(p, computeInfo(this.physics.bottleSpots()), this.game.target, this.rng);
-      this.turnInfo.cpu = { aim: plan.aim, target: plan.target };
-      this.cpuTimer = setTimeout(() => this.doThrow(plan.thrownDist, plan.thrownAim), (delay + CPU_WINDUP * ANIM_SCALE) * 1000);
+  gameOver() {
+    this.phase = 'over';
+    this.dropAbsentSeats(); this.broadcastRoom();
+  }
+
+  startLeague() {
+    const entry = seat => ({ seat, P: 0, W: 0, L: 0, PF: 0, PA: 0 });
+    const entries = this.seats.map(entry);
+    if (entries.length % 2) entries.push(entry({ name: this.botName(), cpu: 'medium', connected: true, filler: true }));
+    this.league = { entries, schedule: roundRobin(entries.length), round: -1, results: [] };
+    this.startRound();
+  }
+  startRound() {
+    clearTimeout(this.timer);
+    const lg = this.league;
+    lg.round++;
+    this.disposeMatches();
+    this.phase = 'playing';
+    this.matches = lg.schedule[lg.round].map(([a, b], k) => new Match(this, `r${lg.round + 1}-${k + 1}`,
+      [lg.entries[a].seat, lg.entries[b].seat],
+      { target: this.target, first: lg.round % 2, onOver: m => this.fixtureOver(m, a, b) }));
+    this.broadcastRoom();
+    this.matches.forEach(m => m.start());
+  }
+  fixtureOver(m, a, b) {
+    const lg = this.league, [pa, pb] = m.game.players;
+    const aWon = m.game.winner ? m.game.winner === pa : pa.score >= pb.score;
+    const A = lg.entries[a], B = lg.entries[b];
+    A.P++; B.P++; A.PF += pa.score; A.PA += pb.score; B.PF += pb.score; B.PA += pa.score;
+    if (aWon) { A.W++; B.L++; } else { B.W++; A.L++; }
+    lg.results.push({ round: lg.round + 1, a: A.seat.name, b: B.seat.name, sa: pa.score, sb: pb.score, aWon });
+    if (this.matches.every(x => x.over)) return this.endRound();
+    this.broadcastRoom();
+  }
+  endRound() {
+    const lg = this.league;
+    if (lg.round >= lg.schedule.length - 1) {
+      this.phase = 'over';
+      this.dropAbsentSeats();
+    } else {
+      this.phase = 'between';
+      this.nextRoundAt = Date.now() + BETWEEN_ROUNDS;
+      this.timer = setTimeout(() => this.startRound(), BETWEEN_ROUNDS);
     }
-    this.broadcast({ t: 'turn', ...this.turnInfo });
+    this.broadcastRoom();
   }
-  doThrow(dist, aim) {
-    if (this.phase !== 'playing') return;
-    const { physics, game } = this, thrower = game.cur;
-    const { bodies, frames, fps } = simulateThrow(physics, dist, aim);
-    const fallen = physics.fallenBottles().map(b => b.num);
-    const msg = scoreThrow(game, fallen);
 
-    const plan = planRestand(physics.bottles.map(b => ({ t: b.body.translation(), q: b.body.rotation() })), this.rng);
-    physics.removeStick();
-    const restand = [];
-    physics.bottles.forEach((b, i) => {
-      if (!plan[i].needs) return;
-      physics.placeUpright(b.body, plan[i].x, plan[i].z);
-      restand.push([i, plan[i].x, plan[i].z]);
-    });
-    settle(physics);
-
-    const over = isGameOver(game);
-    if (!over) advanceTurn(game);
-    this.broadcast({
-      t: 'throw', seat: thrower, dist, aim, fps, bodies, frames, fallen, msg, restand,
-      poses: snapshot(physics), game: this.publicGame(), over,
-    });
-    const anim = (frames.length / fps + SCORE_PAUSE + RESTAND) * ANIM_SCALE;
-    this.busyUntil = Date.now() + anim * 1000;
-    if (over) { this.phase = 'over'; this.turnInfo = null; this.dropAbsentSeats(); this.broadcastRoom(); }
-    else this.beginTurn(anim);
-  }
-  // People who aren't connected don't keep their seat into the next game.
-  dropAbsentSeats() { for (const s of this.seats.filter(s => !s.cpu && !s.connected)) this.removeSeat(s); }
-
-  dispose() { clearTimeout(this.cpuTimer); this.seats.forEach(s => clearTimeout(s.dropTimer)); this.physics.world.free(); }
+  disposeMatches() { this.matches.forEach(m => m.dispose()); this.matches = []; }
+  dispose() { clearTimeout(this.timer); this.disposeMatches(); this.seats.forEach(s => clearTimeout(s.dropTimer)); }
 }
