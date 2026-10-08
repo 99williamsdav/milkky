@@ -9,7 +9,7 @@ import { mulberry32 } from '../src/shared/rng.js';
 import { simulateThrow, snapshot, settle } from './sim.js';
 
 export const MAX_SEATS = 4;
-const TARGETS = [30, 50];
+const TARGETS = [20, 30, 50];
 const CPU_LEVELS = Object.keys(LEVELS);
 const LEVEL_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 // How long clients spend animating, in seconds; matches the local game. MILKKY_ANIM_SCALE=0 skips waits in tests.
@@ -95,7 +95,7 @@ export class Room {
     switch (m.t) {
       case 'target':
         if (!isHost || this.phase === 'playing') return this.error(seat, 'Only the host can change the target before a game');
-        if (!TARGETS.includes(m.target)) return this.error(seat, 'Target must be 30 or 50');
+        if (!TARGETS.includes(m.target)) return this.error(seat, 'Target must be 20, 30 or 50');
         this.target = m.target; return this.broadcastRoom();
       case 'addCpu':
         if (!isHost || this.phase === 'playing') return this.error(seat, 'Only the host can add players before a game');

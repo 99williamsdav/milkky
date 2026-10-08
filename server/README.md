@@ -19,7 +19,7 @@ npm test           # plays a full 2 people + 1 computer game against a real serv
 | `join` | `code`, `name` | only before a game starts, max 4 seats |
 | `rejoin` | `code`, `token` | after a refresh; token comes from `joined` |
 | `leave` | | |
-| `target` | `target` (30 or 50) | host, outside a game |
+| `target` | `target` (20, 30 or 50) | host, outside a game |
 | `addCpu` | `level` (`easy`/`medium`/`hard`) | host, outside a game |
 | `removeCpu` | `seat` | host, outside a game |
 | `start` | | host; also starts a rematch after `over` |
