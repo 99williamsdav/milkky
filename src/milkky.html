@@ -168,6 +168,21 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #mineList .status.go{color:var(--blue);font-weight:700}
 #mineList:empty::before{content:"No games yet. Start one with Play online.";color:var(--muted);font-size:14px;padding:6px 0}
 .lgtable td small{color:var(--muted);font-weight:400}
+/* The Milk King: beside the final table when you win a league (above it on phones). The words are drawn in 3D
+   too, so the plain-text copy is for screen readers (and if 3D isn't available). */
+.overlay{gap:16px}
+.king{width:260px;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:10px;text-align:center;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.king[hidden]{display:none}
+.king-canvas{display:block;width:100%;aspect-ratio:120/150;border-radius:14px}
+.king-text{margin:8px 0 2px;font-weight:800;line-height:1.02;font-size:24px;color:var(--ink);display:flex;flex-direction:column}
+.king-text span:last-child{font-size:34px;color:var(--blue)}
+.king.has3d .king-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (max-width: 720px){
+  #hub,#league{flex-direction:column;justify-content:flex-start}
+  #hub .card,#league .card{min-height:0;flex:0 1 auto}
+  .king{width:min(190px,52vw);padding:6px}
+}
 @media (prefers-reduced-motion: reduce){ .chip,#toast{transition:none} }
 </style>
 </head>
@@ -226,6 +241,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
   </div>
 
   <div class="overlay" id="league" hidden>
+    <div class="king" id="lgKing" hidden></div>
     <div class="card wide">
       <h2 id="lgTitle">League</h2>
       <p class="sub" id="lgSub"></p>
@@ -287,6 +303,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
   </div>
 
   <div class="overlay" id="hub" hidden>
+    <div class="king" id="hubKing" hidden></div>
     <div class="card wide">
       <h2 id="hubTitle"></h2>
       <p class="sub" id="hubSub"></p>
@@ -307,7 +324,10 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
   </div>
 </div>
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
 </script>
 <script type="module" src="client/main.js"></script>
 </body>

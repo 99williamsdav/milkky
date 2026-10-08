@@ -9,6 +9,7 @@ import { app, renderer, canvas, scene, camera } from './scene.js';
 import { decorateBottles, stickMesh, hand, aimGeo, aimLine, landRing } from './models.js';
 import { clearMilk, updateMilk } from './milk.js';
 import * as League from './league.js';
+import { showMilkKing } from './milkking.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
 
@@ -256,6 +257,7 @@ function renderLeague() {
     $('#lgNext').innerHTML = `Next: <b>You</b> vs <b>${opp.name}</b> <span style="color:var(--muted)">(skill ${dots(opp.skill)})</span>`;
     $('#lgPlay').textContent = 'Play match';
   }
+  showMilkKing($('#lgKing'), done && League.standings()[0].e.human);
 }
 function openLeague() {
   if (!League.lg.league) League.newLeague(1, chosenTarget);

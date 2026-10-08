@@ -1,5 +1,7 @@
 // The online league screen (live games, this round's results, the table) and the live-scores strip.
 // Pure rendering from the room state the server sends; main.js decides when to show it.
+import { showMilkKing } from './milkking.js';
+
 const $ = s => document.querySelector(s);
 export const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -58,6 +60,7 @@ export function renderHub({ room, fixtures, you, view, watching, secsToNext, rou
   }
   $('#hubTitle').innerHTML = title;
   $('#hubSub').innerHTML = sub;
+  showMilkKing($('#hubKing'), room.phase === 'over' && lg.table[0].seat === you);
 
   // Live games you can watch (not your own)
   $('#hubLiveWrap').hidden = room.phase !== 'playing' || !live.length;
