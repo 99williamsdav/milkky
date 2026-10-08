@@ -9,7 +9,7 @@ import { app, renderer, canvas, scene, camera } from './scene.js';
 import { decorateBottles, stickMesh, hand, aimGeo, aimLine, landRing } from './models.js';
 import { clearMilk, updateMilk } from './milk.js';
 import * as League from './league.js';
-import { createNet, hasSession } from './net.js';
+import { createNet, savedRoom } from './net.js';
 
 const $ = s => document.querySelector(s);
 let RAPIER;
@@ -309,12 +309,20 @@ function shareLink(code) {
   return u.href;
 }
 
-// Name and room code
+// Name and room code. With a code (from a room link) the screen leads with joining that room.
 function openOnline(code = '') {
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
   let name = '';
   try { name = localStorage.getItem(NAME_KEY) || ''; } catch (e) {}
   $('#onName').value = name; $('#onCode').value = code; $('#onErr').textContent = '';
+  $('#onCard').classList.toggle('joining', !!code);
+  $('#onTitle').textContent = code ? `Join room ${code}` : 'Play online';
+  $('#onSub').textContent = code ? 'Enter your name to join the game.'
+    : 'Play with friends on their own devices. Create a room and share the code, or join theirs.';
+  $('#onCreate').textContent = code ? 'Create a new room instead' : 'Create a room';
+  const current = savedRoom();
+  $('#onNote').textContent = current && current !== code ? `This will take you out of your game in room ${current}.` : '';
+  $('#onBack').textContent = current ? `Back to room ${current}` : 'Back';
   setEntryBusy(false);
   $('#online').hidden = false;
   (name ? (code ? $('#onJoin') : $('#onCreate')) : $('#onName')).focus();
@@ -518,7 +526,10 @@ $('#onJoin').onclick = () => {
 };
 $('#onName').addEventListener('keydown', e => { if (e.key === 'Enter') ($('#onCode').value.trim() ? $('#onJoin') : $('#onCreate')).click(); });
 $('#onCode').addEventListener('keydown', e => { if (e.key === 'Enter') $('#onJoin').click(); });
-$('#onBack').onclick = () => { if (mode === 'online') leaveOnline(); else { $('#online').hidden = true; $('#setup').hidden = false; } };
+$('#onBack').onclick = () => {
+  if (savedRoom()) { $('#online').hidden = true; enterOnline(); net.resume(); return; } // back to the game we came from
+  if (mode === 'online') leaveOnline(); else { $('#online').hidden = true; $('#setup').hidden = false; }
+};
 $('#lbTarget').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'target', target: +b.dataset.t }); });
 $('#lbAdd').addEventListener('click', e => { const b = e.target.closest('button'); if (b) net.send({ t: 'addCpu', level: b.dataset.level }); });
 $('#lbSeats').addEventListener('click', e => { const b = e.target.closest('button[data-rm]'); if (b) net.send({ t: 'removeCpu', seat: +b.dataset.rm }); });
@@ -663,7 +674,8 @@ $('#viewBtn').onclick = () => {
 
 setStickHeld();
 $('#loading').hidden = true;
-const roomParam = new URLSearchParams(location.search).get('room');
-if (hasSession()) { enterOnline(); net.resume(); } // refreshed during an online game
-else if (roomParam) openOnline(roomParam.toUpperCase().slice(0, 4));
+// A refresh in an online game rejoins it; a link to a different room offers to join that one instead.
+const roomParam = (new URLSearchParams(location.search).get('room') || '').toUpperCase().slice(0, 4), current = savedRoom();
+if (current && (!roomParam || roomParam === current)) { enterOnline(); net.resume(); }
+else if (roomParam) openOnline(roomParam);
 else $('#setup').hidden = false;

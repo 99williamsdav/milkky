@@ -12,7 +12,8 @@ export function serverUrl() {
 function loadSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch (e) { return null; } }
 function saveSession(s) { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {} }
 function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} }
-export const hasSession = () => !!loadSession();
+// Room code of the seat saved in this tab, if any
+export const savedRoom = () => loadSession()?.code || null;
 
 // onMessage(msg) for every server message; onStatus('open' | 'reconnecting' | 'failed' | 'closed')
 export function createNet(onMessage, onStatus) {
@@ -47,17 +48,23 @@ export function createNet(onMessage, onStatus) {
   }
 
   return {
-    // Connect (if needed) and send `first`, e.g. a create or join message.
+    // Connect (if needed) and send `first`, a create or join message. A seat saved in this tab is
+    // sent along so the server frees it once the new room has let us in.
     start(first) {
       wanted = true;
+      const session = loadSession();
+      if (session) first = { ...first, leave: session };
       if (ws && ws.readyState === 1) return ws.send(JSON.stringify(first));
       pending = first;
       if (!ws) open();
     },
     // Reconnect to the seat saved in this tab, if any. Returns false if there's nothing to resume.
     resume() {
-      if (!loadSession()) return false;
-      wanted = true; if (!ws) open();
+      const session = loadSession();
+      if (!session) return false;
+      wanted = true; pending = null;
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'rejoin', code: session.code, token: session.token }));
+      else if (!ws) open();
       return true;
     },
     send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); },

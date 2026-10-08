@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Milkky</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
 <style>
@@ -106,6 +108,15 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 .joinrow{display:flex;gap:8px}
 .joinrow input{text-transform:uppercase;letter-spacing:.2em;font-weight:800}
 .err{color:var(--bad);font-size:14px;margin:0 0 12px}
+.note{color:var(--muted);font-size:14px;margin:0 0 12px}
+.note:empty{display:none}
+.entry{display:flex;flex-direction:column}
+.entry .create{width:100%}
+/* Arrived by a room link: joining comes first, creating a room is a small option underneath */
+.joining .entry .joinrow{order:1}
+.joining .entry .or{display:none}
+.joining .entry .create{order:2;width:auto;align-self:flex-start;background:none;border:0;padding:0 0 16px;font-size:14px;font-weight:600;color:var(--blue);text-decoration:underline}
+.joining .joinrow button{background:var(--blue);color:var(--blue-ink);border-color:transparent;font-size:17px;padding:11px 26px}
 .err:empty{display:none}
 .or{color:var(--muted);font-size:13px;text-align:center;margin:14px 0}
 .linkrow{display:flex;gap:8px;align-items:center;margin:0 0 18px}
@@ -184,14 +195,17 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
   </div>
 
   <div class="overlay" id="online" hidden>
-    <div class="card">
-      <h2>Play online</h2>
-      <p class="sub">Play with friends on their own devices. Create a room and share the code, or join theirs.</p>
+    <div class="card" id="onCard">
+      <h2 id="onTitle">Play online</h2>
+      <p class="sub" id="onSub"></p>
       <div class="field"><label for="onName">Your name</label><input id="onName" maxlength="16" autocomplete="nickname" placeholder="e.g. Sam"></div>
       <p class="err" id="onErr" role="alert"></p>
-      <button class="primary" id="onCreate" style="width:100%">Create a room</button>
-      <div class="or">or join a friend&#39;s room</div>
-      <div class="field joinrow"><input id="onCode" maxlength="4" autocomplete="off" placeholder="CODE" aria-label="Room code"><button id="onJoin">Join</button></div>
+      <p class="note" id="onNote"></p>
+      <div class="entry">
+        <button class="primary create" id="onCreate">Create a room</button>
+        <div class="or">or join a friend&#39;s room</div>
+        <div class="field joinrow"><input id="onCode" maxlength="4" autocomplete="off" placeholder="CODE" aria-label="Room code"><button id="onJoin">Join</button></div>
+      </div>
       <button id="onBack">Back</button>
     </div>
   </div>

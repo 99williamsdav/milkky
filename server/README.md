@@ -15,8 +15,8 @@ npm test           # plays a full 2 people + 1 computer game against a real serv
 
 | `t` | fields | notes |
 |---|---|---|
-| `create` | `name` | new room; you are the host |
-| `join` | `code`, `name` | only before a game starts, max 4 seats |
+| `create` | `name`, `leave?` | new room; you are the host |
+| `join` | `code`, `name`, `leave?` | only before a game starts, max 4 seats |
 | `rejoin` | `code`, `token` | after a refresh; token comes from `joined` |
 | `leave` | | |
 | `target` | `target` (20, 30 or 50) | host, outside a game |
@@ -25,6 +25,8 @@ npm test           # plays a full 2 people + 1 computer game against a real serv
 | `start` | | host; also starts a rematch after `over` |
 | `aim` | `aim`, `pull` | current thrower's live aim, relayed to others |
 | `throw` | `dist` (m), `aim` (rad) | current thrower; clamped to 0.5–9.5 m and ±0.55 rad |
+
+`leave?` on `create`/`join` is the `{ code, token }` of a seat held in another room. It is given up only once the new room has let you in.
 
 ## Server → client
 

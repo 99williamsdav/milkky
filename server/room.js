@@ -16,6 +16,7 @@ const LEVEL_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 const ANIM_SCALE = process.env.MILKKY_ANIM_SCALE !== undefined ? +process.env.MILKKY_ANIM_SCALE : 1;
 const SCORE_PAUSE = 1.3, RESTAND = 0.5, CPU_WINDUP = 1.95;
 const EARLY_GRACE = 300; // ms: accept a throw slightly before we expect the thrower's animation to finish
+const LOBBY_GRACE = 60_000; // ms a disconnected player keeps their lobby seat, so a refresh doesn't lose it
 
 export const cleanName = s => String(s ?? '').replace(/[\u0000-\u001f<>&"'`]/g, '').trim().slice(0, 16);
 const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -50,14 +51,25 @@ export class Room {
   }
   reattach(seat, ws) {
     if (seat.ws && seat.ws !== ws) seat.ws.close(4000, 'Joined from another tab');
+    clearTimeout(seat.dropTimer);
     seat.ws = ws; seat.connected = true; this.emptySince = null;
   }
-  disconnect(seat) {
+  // `left`: the player chose to go (or moved to another room), rather than losing the connection.
+  disconnect(seat, { left = false } = {}) {
     seat.ws = null; seat.connected = false;
-    // Outside a game an empty seat just goes away; during one it's kept so the player can rejoin.
-    if (this.phase !== 'playing') this.seats.splice(this.seats.indexOf(seat), 1);
+    // During a game the seat is kept so the player can rejoin. Outside one, a player who left goes
+    // straight away; a dropped connection (e.g. a page refresh) keeps the seat for a while first.
+    if (this.phase !== 'playing') {
+      if (left) this.removeSeat(seat);
+      else seat.dropTimer = setTimeout(() => { if (!seat.connected && this.phase !== 'playing') { this.removeSeat(seat); this.broadcastRoom(); } }, LOBBY_GRACE);
+    }
     if (!this.seats.some(s => !s.cpu && s.connected)) this.emptySince = Date.now();
     this.broadcastRoom();
+  }
+  removeSeat(seat) {
+    clearTimeout(seat.dropTimer);
+    const i = this.seats.indexOf(seat);
+    if (i >= 0) this.seats.splice(i, 1);
   }
   seatIndex(seat) { return this.seats.indexOf(seat); }
 
@@ -135,6 +147,7 @@ export class Room {
   // ---------- Game flow ----------
   start() {
     clearTimeout(this.cpuTimer);
+    this.dropAbsentSeats(); // anyone still away from the lobby doesn't play
     const seed = (Math.random() * 2 ** 32) >>> 0;
     this.rng = mulberry32(seed);
     this.physics.removeStick(); this.physics.resetBottles(); settle(this.physics);
@@ -186,8 +199,8 @@ export class Room {
     if (over) { this.phase = 'over'; this.turnInfo = null; this.dropAbsentSeats(); this.broadcastRoom(); }
     else this.beginTurn(anim);
   }
-  // After a game, people who left don't keep their seat in the lobby.
-  dropAbsentSeats() { this.seats = this.seats.filter(s => s.cpu || s.connected); }
+  // People who aren't connected don't keep their seat into the next game.
+  dropAbsentSeats() { for (const s of this.seats.filter(s => !s.cpu && !s.connected)) this.removeSeat(s); }
 
-  dispose() { clearTimeout(this.cpuTimer); this.physics.world.free(); }
+  dispose() { clearTimeout(this.cpuTimer); this.seats.forEach(s => clearTimeout(s.dropTimer)); this.physics.world.free(); }
 }

@@ -106,5 +106,31 @@ console.log(`Bottles moving per throw: ${A.throws.map(t => t.bodies.length - 1).
 const over = await A.next(m => m.t === 'room' && m.phase === 'over');
 check(over.seats.length === 3, 'room returns to the lobby after the game');
 
+// ---------- Moving to another room ----------
+// Alice follows a link elsewhere: her old seat should only go once the new room accepts her.
+const A2 = client('Alice elsewhere'); await A2.open;
+A2.send({ t: 'join', code: 'ZZZZ', name: 'Alice', leave: { code: aJoined.code, token: aJoined.token } });
+await A2.next(is('error'));
+await new Promise(r => setTimeout(r, 200));
+check(!me[1].inbox.some(m => m.t === 'room' && !m.seats.some(s => s.name.startsWith('Alice'))), 'a failed join keeps the old seat');
+A2.send({ t: 'create', name: 'Alice', leave: { code: aJoined.code, token: aJoined.token } });
+const moved = await A2.next(is('joined'));
+const bRoom = await me[1].next(m => m.t === 'room' && !m.seats.some(s => s.name.startsWith('Alice')));
+check(moved.code !== aJoined.code && bRoom.seats.length === 2, 'Alice moves to a new room and her old seat is freed');
+
+// ---------- Refreshing in the lobby ----------
+const C = client('Cara'); await C.open;
+C.send({ t: 'join', code: moved.code, name: 'Cara' });
+const cJoined = await C.next(is('joined'));
+C.ws.terminate(); // e.g. a page refresh
+const away = await A2.next(m => m.t === 'room' && m.seats.some(s => s.name === 'Cara' && !s.connected));
+check(away.seats.length === 2, 'a dropped lobby player is shown as away, not removed');
+const C2 = client('Cara again'); await C2.open;
+C2.send({ t: 'rejoin', code: moved.code, token: cJoined.token });
+check((await C2.next(m => m.t === 'joined' || m.t === 'error')).t === 'joined', 'they get their lobby seat back');
+C2.send({ t: 'leave' });
+const gone = await A2.next(m => m.t === 'room' && !m.seats.some(s => s.name === 'Cara'));
+check(gone.seats.length === 1, 'choosing to leave frees the seat straight away');
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 done(failures ? 1 : 0);

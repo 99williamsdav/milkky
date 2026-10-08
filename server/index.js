@@ -36,9 +36,17 @@ function enter(ws, room, seat) {
   if (room.game && room.phase === 'playing') send(ws, room.syncState());
 }
 
+// Give up a seat held elsewhere (`prev` = { code, token }), e.g. when someone follows a link to another room.
+function abandon(prev, ws) {
+  const room = prev && findRoom(prev.code), seat = room && room.seats.find(s => s.token && s.token === prev.token);
+  if (!seat) return;
+  if (seat.ws && seat.ws !== ws) { seat.ws.room = seat.ws.seat = null; seat.ws.close(4001, 'Joined another room'); }
+  room.disconnect(seat, { left: true });
+}
+
 function onMessage(ws, m) {
   if (ws.room) {
-    if (m.t === 'leave') { const { room, seat } = ws; ws.room = ws.seat = null; return room.disconnect(seat); }
+    if (m.t === 'leave') { const { room, seat } = ws; ws.room = ws.seat = null; return room.disconnect(seat, { left: true }); }
     return ws.room.handle(ws.seat, m);
   }
   switch (m.t) {
@@ -46,13 +54,15 @@ function onMessage(ws, m) {
       if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'error', msg: 'The server is full, try again later' });
       const room = new Room(newCode(), RAPIER);
       rooms.set(room.code, room);
-      return enter(ws, room, room.addHuman(ws, m.name));
+      enter(ws, room, room.addHuman(ws, m.name));
+      return abandon(m.leave, ws);
     }
     case 'join': {
       const room = findRoom(m.code);
       if (!room) return send(ws, { t: 'error', msg: 'No room with that code' });
       if (!room.canJoin()) return send(ws, { t: 'error', msg: room.phase === 'playing' ? 'That game has already started' : 'That room is full' });
-      return enter(ws, room, room.addHuman(ws, m.name));
+      enter(ws, room, room.addHuman(ws, m.name));
+      return abandon(m.leave, ws); // only once the new room has let us in
     }
     case 'rejoin': { // after a refresh or dropped connection
       const room = findRoom(m.code), seat = room && room.seats.find(s => s.token && s.token === m.token);
