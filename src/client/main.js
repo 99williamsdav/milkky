@@ -302,9 +302,12 @@ function setRoomParam(code) {
   if (code) u.searchParams.set('room', code); else u.searchParams.delete('room');
   history.replaceState(null, '', u);
 }
+// Invites go through /join (join.html, mapped in nginx), which has its own "Join me" link preview
+// and forwards to the game.
 function shareLink(code) {
-  const u = new URL(location.href), server = u.searchParams.get('server');
-  u.search = ''; u.searchParams.set('room', code);
+  const here = new URL(location.href), server = here.searchParams.get('server');
+  const u = new URL('join', here);
+  u.searchParams.set('room', code);
   if (server) u.searchParams.set('server', server);
   return u.href;
 }
