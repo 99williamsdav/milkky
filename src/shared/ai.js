@@ -27,9 +27,27 @@ export function computeInfo(list) {
   });
 }
 
+// The spot where a throw is least likely to miss: the middle of the biggest, nearest group of bottles.
+// (Aiming between bottles in a group knocks something over more often than aiming at any one bottle.)
+export function safestSpot(info) {
+  let best = info[0], bestScore = -Infinity;
+  for (const c of info) {
+    const near = info.filter(o => Math.hypot(o.x - c.x, o.z - c.z) < 0.2); // includes c
+    const around = info.filter(o => Math.hypot(o.x - c.x, o.z - c.z) < 0.32).length;
+    const score = near.length * 2 + around - Math.hypot(c.x - RELEASE.x, c.z - RELEASE.z) * 0.3;
+    if (score > bestScore) {
+      bestScore = score;
+      best = { ...c, x: near.reduce((s, o) => s + o.x, 0) / near.length, z: near.reduce((s, o) => s + o.z, 0) / near.length };
+    }
+  }
+  return best;
+}
+
 export function cpuChooseTarget(pl, info, target, samples = 80, rng = Math.random) {
   const need = target - pl.score, ai = pl.ai;
   const byNum = n => info.find(i => i.bottle.num === n);
+  // Last life: a miss means going out, so play safe whatever the score, and go for a big cluster.
+  if (pl.misses >= 2) return safestSpot(info);
   if (ai.think === 'basic') {
     // Spots a winning bottle half the time; otherwise just throws at a random bottle.
     if (need <= 12 && rng() < 0.5) return byNum(need);
