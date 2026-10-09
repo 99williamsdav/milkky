@@ -11,6 +11,7 @@ import { clearMilk, updateMilk } from './milk.js';
 import * as League from './league.js';
 import { showMilkKing } from './milkking.js';
 import { faceSVG } from './faces.js';
+import * as Achv from './achievements.js';
 import { botById } from '../shared/roster.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
@@ -72,6 +73,7 @@ function startGame(types) {
 function launch(first) {
   game.cur = first; game.winner = null; physics.removeStick(); resetBottles();
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
+  Achv.gameStarted(game.players.map(p => !p.cpu)); // on this device, every person's throws count
   beginTurn();
 }
 function beginTurn() {
@@ -109,7 +111,11 @@ function throwTip() {
 }
 
 // ---------- Throwing ----------
+// Where each bottle stands now: { [num]: { x, z } } (for achievements that care where a bottle was)
+const bottlePlaces = () => Object.fromEntries(bottles.map(p => { const t = p.body.translation(); return [p.num, { x: t.x, z: t.z }]; }));
+let throwFrom = null; // the bottles' places when this throw was made
 function throwStick(speed, aim) {
+  throwFrom = bottlePlaces();
   physics.throwStick(speed, aim);
   scene.add(stickMesh); stickMesh.rotation.set(0, 0, 0);
   state = 'flying'; flyTime = 0; calm = 0; landed = false; landRing.visible = false;
@@ -191,7 +197,11 @@ function cpuTick(dt) {
 function resolveThrow() {
   const fallen = physics.fallenBottles();
   fallen.forEach(p => p.label.material.color.set(0xff6b5b));
+  const thrower = game.cur, before = game.players[thrower], scoreBefore = before.score, missesBefore = before.misses;
   const msg = scoreThrow(game, fallen.map(p => p.num));
+  Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, before: throwFrom || {}, release: RELEASE,
+    target: game.target, players: game.players, scoreBefore, missesBefore,
+    winner: game.winner ? game.players.indexOf(game.winner) : -1, over: isGameOver(game) });
   toast(msg, 2200); renderBoard();
   state = 'scoring'; phaseT = 0;
 }
@@ -328,7 +338,12 @@ function openNewLeague() {
 }
 function playLeagueMatch() {
   const { league } = League.lg;
-  if (League.seasonDone()) { League.nextSeason(); renderLeague(); return; }
+  if (League.seasonDone()) {
+    League.nextSeason();
+    const sm = League.lg.summary;
+    if (sm.newTier < sm.tier) Achv.unlock('goingUp');
+    renderLeague(); return;
+  }
   if (League.nextEvent() === 'cup') {
     const t = League.myCupTie(), opp = League.entryFor(t.a === League.YOU ? t.b : t.a);
     mode = 'league'; leagueMatch = { cup: true }; game.target = League.leagueTarget();
@@ -341,10 +356,24 @@ function playLeagueMatch() {
   launch(league.round % 2); // alternate who throws first
 }
 function finishLeagueMatch() {
-  const [me, bot] = game.players;
-  if (leagueMatch.cup) League.finishCupTie(me.score, bot.score, game.winner === me);
-  else League.finishRound(leagueMatch.oi, me.score, bot.score, game.winner === me);
+  const [me, bot] = game.players, won = game.winner === me, { league, cup } = League.lg;
+  if (leagueMatch.cup) {
+    // Giant Killer: knocking a Premier League player (they had a bye) out of the cup from the Sunday League
+    if (won && league.tier === 2 && cup.byes.includes(bot.bot)) Achv.unlock('giantKiller');
+    League.finishCupTie(me.score, bot.score, won);
+  } else League.finishRound(leagueMatch.oi, me.score, bot.score, won);
   leagueMatch = null; mode = 'quick';
+  careerAchievements();
+}
+// Season milestones (cup ties between bots can decide some of these, so check after every match)
+function careerAchievements() {
+  const { league, cup } = League.lg, cupWon = cup.winner === League.YOU;
+  if (cupWon) Achv.unlock('cupWinner');
+  if (!League.leagueDone()) return;
+  const table = League.standings(), top = table[0].e.human, me = table.find(x => x.e.human).e;
+  if (me.W === league.schedule.length) Achv.unlock('invincible');
+  if (top && league.tier === 0) Achv.unlock('milkKing');
+  if (top && cupWon) Achv.unlock('double');
 }
 League.loadLeague();
 
@@ -484,6 +513,8 @@ function onGameMessage(m) {
 }
 function onRoom(m) {
   online.room = m; online.seat = m.you;
+  // Long Haul: a take-your-time league we were in has finished
+  if (m.mode === 'league' && m.pace === 'async' && m.phase === 'over' && m.league?.table.some(e => e.seat === m.you)) Achv.unlock('longHaul');
   if (m.fixtures) online.fixtures = m.fixtures;
   if (m.league?.nextRoundIn != null) online.nextRoundAt = performance.now() + m.league.nextRoundIn;
   online.roundEndsAt = m.league?.roundEndsIn != null ? performance.now() + m.league.roundEndsIn : null;
@@ -628,6 +659,8 @@ function onlineSync(m) {
   physics.removeStick();
   clearMilk(bottles); bottles.forEach(p => p.label.material.color.set(0xffffff));
   applyGame(m.game); snapPoses(m.poses); setStickHeld();
+  // Achievements count in our own game; joining partway (a rejoin) doesn't count as the opening throw
+  if (online.view === 'game') Achv.gameStarted(game.players.map((p, i) => isMe(i)), { midway: m.t === 'sync' }); else Achv.gameLeft();
   state = 'remote'; renderBoard();
   $('#hubBtn').hidden = online.room?.mode !== 'league';
   renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
@@ -669,6 +702,8 @@ function updateCountdown() {
 function onlineThrow(m) {
   aimLine.visible = false; cpu = null; online.turnEndsAt = null;
   online.play = m; online.lastThrower = m.seat;
+  const p = game.players[m.seat];
+  online.throwFrom = { before: bottlePlaces(), scoreBefore: p?.score ?? 0, missesBefore: p?.misses ?? 0 };
   scene.add(stickMesh); stickMesh.visible = true;
   state = 'flying'; flyTime = 0; landed = false; landRing.visible = false;
   updateCountdown();
@@ -705,6 +740,12 @@ function resolveOnlineThrow() {
   const fallen = new Set(m.fallen);
   bottles.forEach(p => { if (fallen.has(p.num)) p.label.material.color.set(0xff6b5b); });
   applyGame(m.game); game.cur = m.seat; // keep the thrower highlighted until the next turn
+  if (online.view === 'game') { // our own game (not one we're watching)
+    const f = online.throwFrom;
+    Achv.thrown({ who: m.seat, fallen: m.fallen, hit: m.hit, before: f.before, release: RELEASE, target: game.target,
+      players: game.players, scoreBefore: f.scoreBefore, missesBefore: f.missesBefore, winner: m.game.winner, over: m.over });
+    if (m.over && game.players.some((p, i) => !p.cpu && !isMe(i))) Achv.unlock('goodCompany');
+  }
   toast(m.msg, 2200); renderBoard();
   state = 'scoring'; phaseT = 0;
 }
@@ -950,6 +991,35 @@ $('#lgCreate').onclick = () => { League.newCareer(newLength); openLeague(); };
 // Back: to the league you have (choosing Start over doesn't lose it until you start the new one), or the menu
 $('#lgNewBack').onclick = () => { if (League.lg.league) openLeague(); else { $('#lgNew').hidden = true; $('#setup').hidden = false; } };
 $('#onlineBtn').onclick = () => openOnline();
+
+// ---------- Achievements ----------
+const TROPHY = (locked = false, size = 34) => { const [fill, ink] = locked ? ['#c9c4b8', '#8a8578'] : ['#f2c230', '#8a6a10'];
+  return `<svg class="trophy" width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true"><path d="M12 6h16v8a8 8 0 0 1-16 0z" fill="${fill}" stroke="${ink}" stroke-width="2"/>
+    <path d="M12 9H6c0 6 3 9 7 9M28 9h6c0 6-3 9-7 9" fill="none" stroke="${ink}" stroke-width="2"/><rect x="18" y="22" width="4" height="7" fill="${fill}" stroke="${ink}" stroke-width="2"/>
+    <rect x="12" y="29" width="16" height="5" rx="1" fill="${fill}" stroke="${ink}" stroke-width="2"/></svg>`; };
+// Unlock pop-ups, one after another
+const achvQueue = [];
+let achvShowing = false;
+function nextAchievement() {
+  const a = achvQueue.shift(), el = $('#achvPop');
+  if (!a) { achvShowing = false; return; }
+  achvShowing = true;
+  el.innerHTML = `${TROPHY()}<span class="t"><small>Achievement unlocked</small><b>${esc(a.name)}</b><span class="d">${esc(a.desc)}</span></span>`;
+  el.classList.add('show');
+  setTimeout(() => { el.classList.remove('show'); setTimeout(nextAchievement, 400); }, 3800);
+}
+Achv.onUnlocked(a => { achvQueue.push(a); if (!achvShowing) nextAchievement(); refreshAchBtn(); });
+function refreshAchBtn() { $('#achBtn').textContent = `Achievements · ${Achv.count()}/${Achv.ACHIEVEMENTS.length}`; }
+function openAchievements() {
+  const got = Achv.unlocked(), when = t => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  $('#achvSub').textContent = `${Achv.count()} of ${Achv.ACHIEVEMENTS.length} unlocked.`;
+  $('#achvList').innerHTML = Achv.GROUPS.map(g => `<div class="sectionlabel">${g}</div>` + Achv.ACHIEVEMENTS.filter(a => a.group === g).map(a =>
+    `<div class="ach ${got[a.id] ? '' : 'locked'}">${TROPHY(!got[a.id], 30)}<span class="t"><b>${esc(a.name)}</b><span class="d">${esc(a.desc)}</span></span>${got[a.id] ? `<time>${when(got[a.id])}</time>` : ''}</div>`).join('')).join('');
+  $('#setup').hidden = true; $('#achv').hidden = false;
+}
+$('#achBtn').onclick = openAchievements;
+$('#achvBack').onclick = () => { $('#achv').hidden = true; $('#setup').hidden = false; };
+refreshAchBtn();
 $('#overNew').onclick = () => {
   if (mode === 'online') return leaveOnline();
   $('#over').hidden = true; $('#setup').hidden = false; state = 'menu';

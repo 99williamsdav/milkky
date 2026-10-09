@@ -28,11 +28,13 @@ export function createPhysics(RAPIER) {
   const bottles = homePositions().map(({ num, x, z }) => {
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, BOTTLE_HALF + 0.0005, z).setLinearDamping(0.3).setAngularDamping(0.8).setCanSleep(true));
-    world.createCollider(RAPIER.ColliderDesc.cylinder(BOTTLE_HALF, BOTTLE_R).setDensity(DENSITY).setFriction(0.55).setRestitution(0.15), body);
-    return { num, body, homeX: x, homeZ: z };
+    const collider = world.createCollider(RAPIER.ColliderDesc.cylinder(BOTTLE_HALF, BOTTLE_R).setDensity(DENSITY).setFriction(0.55).setRestitution(0.15), body);
+    return { num, body, collider, homeX: x, homeZ: z };
   });
 
-  let stick = null, acc = 0;
+  let stick = null, stickCollider = null, acc = 0;
+  // The first bottle the stick touched on this throw, and whether it was on its top: { num, top } (or null)
+  let firstHit = null;
 
   function placeUpright(body, x, z) {
     body.setTranslation({ x, y: BOTTLE_HALF + 0.0005, z }, true);
@@ -50,7 +52,8 @@ export function createPhysics(RAPIER) {
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(RELEASE.x, RELEASE.y, RELEASE.z).setRotation({ x: right.x * s, y: 0, z: right.z * s, w: c })
       .setLinearDamping(0.15).setAngularDamping(0.7).setCcdEnabled(true).setCanSleep(true));
-    world.createCollider(RAPIER.ColliderDesc.cylinder(STICK_HALF, STICK_R).setDensity(DENSITY).setFriction(0.6).setRestitution(0.2), body);
+    stickCollider = world.createCollider(RAPIER.ColliderDesc.cylinder(STICK_HALF, STICK_R).setDensity(DENSITY).setFriction(0.6).setRestitution(0.2), body);
+    firstHit = null;
     const h = speed * Math.cos(ELEV);
     body.setLinvel({ x: dir.x * h, y: speed * Math.sin(ELEV), z: dir.z * h }, true);
     const spin = 5 + speed; // end-over-end tumble
@@ -59,7 +62,7 @@ export function createPhysics(RAPIER) {
     return body;
   }
   function removeStick() {
-    if (stick) { world.removeRigidBody(stick); stick = null; }
+    if (stick) { world.removeRigidBody(stick); stick = null; stickCollider = null; }
   }
 
   function setDrag(body, grounded, air) {
@@ -85,8 +88,26 @@ export function createPhysics(RAPIER) {
   function advance(dt) {
     applyGrassDrag();
     acc += dt; let n = 0;
-    while (acc >= world.timestep && n < MAX_SUBSTEPS) { rollingResistance(world.timestep); world.step(); acc -= world.timestep; n++; }
+    while (acc >= world.timestep && n < MAX_SUBSTEPS) { rollingResistance(world.timestep); world.step(); noteFirstHit(); acc -= world.timestep; n++; }
     if (n === MAX_SUBSTEPS) acc = 0;
+  }
+
+  // Watch for the stick's first touch on a bottle. A touch on the top face, within the width of the
+  // bottle's neck (in the bottle's own frame), counts as landing on its head; clipping the rim doesn't.
+  function noteFirstHit() {
+    if (!stickCollider || firstHit) return;
+    world.contactPairsWith(stickCollider, other => {
+      if (firstHit) return;
+      const b = bottles.find(b => b.collider.handle === other.handle);
+      if (!b) return;
+      world.contactPair(stickCollider, other, (m, flipped) => {
+        for (let k = 0; k < m.numContacts() && !firstHit; k++) {
+          if (m.contactDist(k) > 0.002) continue;
+          const p = flipped ? m.localContactPoint1(k) : m.localContactPoint2(k); // the point on the bottle
+          firstHit = { num: b.num, top: p.y > BOTTLE_HALF - 0.003 && Math.hypot(p.x, p.z) < 0.018 };
+        }
+      });
+    });
   }
 
   const allBodies = () => stick ? [...bottles.map(b => b.body), stick] : bottles.map(b => b.body);
@@ -98,6 +119,7 @@ export function createPhysics(RAPIER) {
   return {
     world, bottles,
     get stick() { return stick; },
+    get firstHit() { return firstHit; },
     placeUpright, resetBottles, throwStick, removeStick, advance, isMoving, fallenBottles, bottleSpots,
   };
 }

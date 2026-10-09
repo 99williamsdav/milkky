@@ -168,6 +168,26 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #lgNext .opp{display:flex;align-items:center;gap:10px}
 #lgNext .style{color:var(--muted);font-size:13px;font-style:italic;margin-top:2px}
 #lgNext .skill{color:var(--muted);font-size:11px;letter-spacing:1px}
+/* Achievements: the unlock pop-up (over everything, below the scoreboard) and the list */
+#achvPop{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 92px);transform:translate(-50%,-12px);opacity:0;pointer-events:none;z-index:7;
+  display:flex;align-items:center;gap:10px;background:var(--panel);border:2px solid #d4a017;border-radius:16px;padding:8px 16px 8px 10px;
+  width:max-content;max-width:min(92vw,380px);box-shadow:0 6px 20px rgba(0,0,0,.25);transition:opacity .3s, transform .3s}
+#achvPop.show{opacity:1;transform:translate(-50%,0)}
+#achvPop{background:#fbf6ea} /* solid, so nothing shows through */
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) #achvPop{background:#1e2620} }
+:root[data-theme="dark"] #achvPop{background:#1e2620}
+#achvPop .t{display:flex;flex-direction:column}
+#achvPop small{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#b8860b;font-weight:700}
+#achvPop b{font-size:18px;font-weight:800}
+#achvPop .d{font-size:13px;color:var(--muted)}
+.trophy{flex:none}
+#achvList .ach{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+#achvList .ach.locked{opacity:.5}
+#achvList .ach .t{display:flex;flex-direction:column;min-width:0;flex:1}
+#achvList .ach b{font-weight:800}
+#achvList .ach .d{font-size:13px;color:var(--muted)}
+#achvList .ach time{font-size:12px;color:var(--muted);flex:none}
+@media (prefers-reduced-motion: reduce){ #achvPop{transition:none} }
 #lgLength{margin-bottom:6px}
 #lgLength button{display:flex;flex-direction:column;align-items:center;line-height:1.1}
 #lgLength small{font-size:12px;font-weight:600;opacity:.8}
@@ -220,6 +240,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div id="ticker" hidden></div>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
+    <div id="achvPop" role="status" aria-live="polite"></div>
     <div class="bottom">
       <div class="menu" id="menu" hidden>
         <button id="hubBtn" hidden>League</button>
@@ -246,7 +267,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <button data-n="1">1</button><button data-n="2" aria-pressed="true">2</button><button data-n="3">3</button><button data-n="4">4</button>
       </div>
       <div id="slots"></div>
-      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="setupRules">Rules</button></div>
+      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="achBtn">Achievements</button><button id="setupRules">Rules</button></div>
     </div>
   </div>
 
@@ -263,6 +284,15 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       </ul>
       <p><b>Throwing:</b> the stick is thrown underhand and upright. Press and drag down to swing back, then flick up and let go. A faster flick throws further. Where you press left or right of centre sets your aim.</p>
       <button class="primary" id="rulesClose">Got it</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="achv" hidden>
+    <div class="card wide">
+      <h2>Achievements</h2>
+      <p class="sub" id="achvSub"></p>
+      <div id="achvList"></div>
+      <div class="row"><button class="primary" id="achvBack">Back</button></div>
     </div>
   </div>
 
