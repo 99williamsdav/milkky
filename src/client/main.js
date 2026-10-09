@@ -280,9 +280,22 @@ function renderLeague() {
   showMilkKing($('#lgKing'), done && tier === 0 && League.standings()[0].e.human); // only for winning the Premier League
 }
 function openLeague() {
-  if (!League.lg.league) League.newCareer(chosenTarget);
-  ['#setup', '#over'].forEach(s => $(s).hidden = true);
+  if (!League.lg.league) return openNewLeague();
+  ['#setup', '#over', '#lgNew'].forEach(s => $(s).hidden = true);
   state = 'menu'; renderLeague(); $('#league').hidden = false;
+}
+// Starting a league career: choose how long each game is (first to 20, 30 or 50)
+const LENGTH_NOTE = { 20: 'Quick games: first to exactly 20. A season goes by fast.', 30: 'Standard games: first to exactly 30.', 50: 'Full games: first to exactly 50, the official length.' };
+let newLength = 30;
+function setLength(t) {
+  newLength = t;
+  $('#lgLength').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.t === t));
+  $('#lgLengthNote').textContent = LENGTH_NOTE[t];
+}
+function openNewLeague() {
+  ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
+  setLength(chosenTarget in LENGTH_NOTE ? chosenTarget : 30);
+  state = 'menu'; $('#lgNew').hidden = false;
 }
 function playLeagueMatch() {
   const { league } = League.lg;
@@ -895,7 +908,11 @@ $('#againBtn').onclick = () => {
 $('#leagueBtn').onclick = openLeague;
 $('#lgPlay').onclick = playLeagueMatch;
 $('#lgMenu').onclick = () => { $('#league').hidden = true; $('#setup').hidden = false; };
-$('#lgReset').onclick = () => { if (confirm(`Start over from the Sunday League, playing to ${chosenTarget}? Your career so far will be lost.`)) { League.newCareer(chosenTarget); renderLeague(); } };
+$('#lgReset').onclick = () => { if (confirm('Start a new league from the Sunday League? Your career so far will be lost.')) openNewLeague(); };
+$('#lgLength').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setLength(+b.dataset.t); });
+$('#lgCreate').onclick = () => { League.newCareer(newLength); openLeague(); };
+// Back: to the league you have (choosing Start over doesn't lose it until you start the new one), or the menu
+$('#lgNewBack').onclick = () => { if (League.lg.league) openLeague(); else { $('#lgNew').hidden = true; $('#setup').hidden = false; } };
 $('#onlineBtn').onclick = () => openOnline();
 $('#overNew').onclick = () => {
   if (mode === 'online') return leaveOnline();

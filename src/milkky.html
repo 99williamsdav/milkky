@@ -163,6 +163,10 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #lgNext .opp{display:flex;align-items:center;gap:10px}
 #lgNext .style{color:var(--muted);font-size:13px;font-style:italic;margin-top:2px}
 #lgNext .skill{color:var(--muted);font-size:11px;letter-spacing:1px}
+#lgLength{margin-bottom:6px}
+#lgLength button{display:flex;flex-direction:column;align-items:center;line-height:1.1}
+#lgLength small{font-size:12px;font-weight:600;opacity:.8}
+#lgLengthNote{margin:0 0 18px}
 #lbMode{margin-bottom:6px}
 #lbModeNote{margin:0 0 16px}
 .hud > .top{pointer-events:none}
@@ -254,6 +258,17 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       </ul>
       <p><b>Throwing:</b> the stick is thrown underhand and upright. Press and drag down to swing back, then flick up and let go. A faster flick throws further. Where you press left or right of centre sets your aim.</p>
       <button class="primary" id="rulesClose">Got it</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="lgNew" hidden>
+    <div class="card">
+      <h2>New league</h2>
+      <p class="sub">Start in the Sunday League and work your way up to the Premier League. Each season the top 2 go up and the bottom 2 go down.</p>
+      <div style="font-weight:600">Game length</div>
+      <div class="count" id="lgLength"><button data-t="20">20<small>Quick</small></button><button data-t="30">30<small>Standard</small></button><button data-t="50">50<small>Full</small></button></div>
+      <p class="note" id="lgLengthNote"></p>
+      <div class="row"><button class="primary" id="lgCreate">Start league</button><button id="lgNewBack">Back</button></div>
     </div>
   </div>
 
