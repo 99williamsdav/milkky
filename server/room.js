@@ -6,7 +6,8 @@
 // kept while people are away, a league round lasts up to a day (and moves on as soon as its games are
 // done), and at the deadline bots finish any games still going.
 import { randomUUID, createHash } from 'node:crypto';
-import { LEVELS, BOT_NAMES } from '../src/shared/ai.js';
+import { LEVELS } from '../src/shared/ai.js';
+import { ROSTER, botsForLevel } from '../src/shared/roster.js';
 import { roundRobin } from '../src/shared/schedule.js';
 import { Match, TURN_TIME, ASYNC_TURN_TIME } from './match.js';
 import * as store from './store.js';
@@ -57,12 +58,14 @@ export class Room {
     while (this.seats.some(s => s.name === n)) n = `${name} ${k++}`;
     return n;
   }
-  // A Finnish name not already used in this room (or by this league's filler)
-  botName() {
+  // A computer player at `level`: one of that league's characters (shared/roster.js) not already in this
+  // room (or this league), falling back to anyone free, then to a plain "Bot".
+  newBot(level, extra = {}) {
     const seats = [...this.seats, ...(this.league?.entries.map(e => e.seat) || [])];
-    const taken = new Set(seats.map(s => s.name.replace(BOT_SUFFIX, '')));
-    const free = BOT_NAMES.filter(n => !taken.has(n));
-    return this.uniqueName((free.length ? free[(Math.random() * free.length) | 0] : 'Bot') + BOT_SUFFIX);
+    const taken = new Set(seats.map(s => s.bot));
+    const pick = list => { const free = list.filter(b => !taken.has(b.id)); return free[(Math.random() * free.length) | 0]; };
+    const b = pick(botsForLevel(level)) || pick(ROSTER);
+    return { name: this.uniqueName((b ? b.name : 'Bot') + BOT_SUFFIX), bot: b?.id || null, cpu: level, token: null, ws: null, connected: true, ...extra };
   }
   addHuman(ws, name, me) {
     const seat = { name: this.uniqueName(humanName(name) || 'Player'), cpu: null, token: randomUUID(), me: hashKey(me), ws, connected: true };
@@ -128,7 +131,7 @@ export class Room {
     const lg = this.league;
     if (!lg) return null;
     const table = lg.entries.map(e => ({
-      name: e.seat.name, seat: this.seatIndex(e.seat), cpu: e.seat.cpu, left: !!e.seat.left,
+      name: e.seat.name, seat: this.seatIndex(e.seat), cpu: e.seat.cpu, bot: e.seat.bot || null, left: !!e.seat.left,
       P: e.P, W: e.W, L: e.L, PF: e.PF, PA: e.PA,
     })).sort((a, b) => b.W - a.W || (b.PF - b.PA) - (a.PF - a.PA) || b.PF - a.PF);
     return {
@@ -141,7 +144,7 @@ export class Room {
     return {
       t: 'room', code: this.code, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target, host: this.host,
       you: this.seatIndex(forSeat), maxSeats: MAX_SEATS[this.mode],
-      seats: this.seats.map((s, i) => ({ name: s.name, cpu: s.cpu, color: SEAT_COLORS[i], connected: s.connected, left: !!s.left })),
+      seats: this.seats.map((s, i) => ({ name: s.name, cpu: s.cpu, bot: s.bot || null, color: SEAT_COLORS[i], connected: s.connected, left: !!s.left })),
       league: this.leagueState(),
       fixtures: this.mode === 'league' ? this.fixtures() : null,
     };
@@ -211,7 +214,7 @@ export class Room {
         if (lobbyOnly('add players')) return;
         if (!CPU_LEVELS.includes(m.level)) return this.error(seat, 'Unknown level');
         if (this.seats.length >= MAX_SEATS[this.mode]) return this.error(seat, 'The room is full');
-        this.seats.push({ name: this.botName(), cpu: m.level, token: null, ws: null, connected: true });
+        this.seats.push(this.newBot(m.level));
         return this.broadcastRoom();
       case 'removeCpu': {
         const s = this.seats[m.seat];
@@ -271,7 +274,7 @@ export class Room {
   startLeague() {
     const entry = seat => ({ seat, P: 0, W: 0, L: 0, PF: 0, PA: 0 });
     const entries = this.seats.map(entry);
-    if (entries.length % 2) entries.push(entry({ name: this.botName(), cpu: 'medium', connected: true, filler: true }));
+    if (entries.length % 2) entries.push(entry(this.newBot('medium', { filler: true })));
     this.league = { entries, schedule: roundRobin(entries.length), round: -1, results: [] };
     this.startRound();
   }
@@ -332,11 +335,11 @@ export class Room {
     return {
       v: 1, code: this.code, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target,
       nextRoundAt: this.nextRoundAt || null, roundEndsAt: this.roundEndsAt || null, updatedAt: this.updatedAt,
-      seats: this.seats.map(s => ({ name: s.name, cpu: s.cpu, token: s.token, me: s.me || null, left: !!s.left })),
+      seats: this.seats.map(s => ({ name: s.name, cpu: s.cpu, bot: s.bot || null, token: s.token, me: s.me || null, left: !!s.left })),
       league: lg && {
         round: lg.round, schedule: lg.schedule, results: lg.results,
         entries: lg.entries.map(e => ({
-          seat: this.seats.includes(e.seat) ? { s: this.seatIndex(e.seat) } : { filler: { name: e.seat.name, cpu: e.seat.cpu } },
+          seat: this.seats.includes(e.seat) ? { s: this.seatIndex(e.seat) } : { filler: { name: e.seat.name, cpu: e.seat.cpu, bot: e.seat.bot || null } },
           P: e.P, W: e.W, L: e.L, PF: e.PF, PA: e.PA,
         })),
       },

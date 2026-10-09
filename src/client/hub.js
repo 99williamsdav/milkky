@@ -1,6 +1,7 @@
 // The online league screen (live games, this round's results, the table) and the live-scores strip.
 // Pure rendering from the room state the server sends; main.js decides when to show it.
 import { showMilkKing } from './milkking.js';
+import { faceSVG } from './faces.js';
 
 const $ = s => document.querySelector(s);
 export const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -73,7 +74,7 @@ export function renderHub({ room, fixtures, you, view, watching, secsToNext, rou
   $('#hubDone').innerHTML = done.map(result).join('');
 
   $('#hubTable').innerHTML = '<tr><th>#</th><th>Player</th><th>P</th><th>W</th><th>L</th><th>+/−</th></tr>' +
-    lg.table.map((e, i) => `<tr class="${e.seat === you ? 'me' : ''}"><td>${i + 1}</td><td>${esc(e.name)}${e.left ? ' <small>(computer)</small>' : ''}</td>
+    lg.table.map((e, i) => `<tr class="${e.seat === you ? 'me' : ''}"><td>${i + 1}</td><td><span class="who">${e.bot ? faceSVG(e.bot, 20) : ''}${esc(e.name)}</span>${e.left ? ' <small>(computer)</small>' : ''}</td>
       <td>${e.P}</td><td>${e.W}</td><td>${e.L}</td><td>${e.PF - e.PA > 0 ? '+' : ''}${e.PF - e.PA}</td></tr>`).join('');
 
   // Buttons

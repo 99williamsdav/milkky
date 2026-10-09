@@ -60,7 +60,7 @@ export class Match {
       players: g.players.map((p, i) => {
         const s = this.seats[i];
         return { name: p.name, cpu: p.cpu, color: p.color, score: p.score, misses: p.misses, out: p.out,
-          seat: this.room.seatIndex(s), away: this.pace === 'live' && !s.cpu && !s.connected, left: !!s.left };
+          seat: this.room.seatIndex(s), bot: s.bot || null, away: this.pace === 'live' && !s.cpu && !s.connected, left: !!s.left };
       }),
     };
   }

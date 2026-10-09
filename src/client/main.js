@@ -10,6 +10,8 @@ import { decorateBottles, stickMesh, hand, aimGeo, aimLine, landRing } from './m
 import { clearMilk, updateMilk } from './milk.js';
 import * as League from './league.js';
 import { showMilkKing } from './milkking.js';
+import { faceSVG } from './faces.js';
+import { botById } from '../shared/roster.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
 
@@ -85,7 +87,7 @@ function beginTurn() {
 function renderBoard() {
   $('#board').innerHTML = game.players.map((p, i) => `
     <div class="chip ${i === game.cur && state !== 'over' ? 'active' : ''} ${p.out ? 'out' : ''}">
-      <div class="nm"><span class="sw" style="background:${p.color}"></span>${esc(p.name)}${isMe(i) ? ' (you)' : ''}${p.left ? '<small>· computer</small>' : p.away ? '<small>· away</small>' : ''}</div>
+      <div class="nm">${p.bot ? faceSVG(p.bot, 18) : `<span class="sw" style="background:${p.color}"></span>`}${esc(p.name)}${isMe(i) ? ' (you)' : ''}${p.left ? '<small>· computer</small>' : p.away ? '<small>· away</small>' : ''}</div>
       <div class="sc">${p.score}<small>/${game.target}</small></div>
       <div class="dots">${[0, 1, 2].map(k => `<i class="${k < p.misses ? 'on' : ''}"></i>`).join('')}</div>
       <div class="cd"></div>
@@ -233,43 +235,61 @@ function showOver() {
 // ---------- League ----------
 const dots = sk => '●'.repeat(Math.round(1 + sk * 4)) + '○'.repeat(4 - Math.round(sk * 4));
 const ordinal = n => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
+// A name with its face (bots) for the league screens
+const who = e => e.human ? '<b>You</b>' : `<span class="who">${faceSVG(e.bot, 22)}${esc(e.name)}</span>`;
 function renderLeague() {
-  const { league, lastRound } = League.lg, done = League.seasonDone();
-  $('#lgTitle').textContent = `League · season ${league.season} · first to ${League.leagueTarget()}`;
-  $('#lgSub').textContent = done ? 'Season complete.' : `Round ${league.round + 1} of ${league.schedule.length}. Win games to climb the table.`;
+  const { league, lastRound, summary } = League.lg, done = League.seasonDone(), tier = league.tier;
+  const above = tier > 0 ? League.tierName(tier - 1) : null, below = tier < 2 ? League.tierName(tier + 1) : null;
+  $('#lgTitle').textContent = `${League.tierName(tier)} · season ${league.season}`;
+  $('#lgSub').textContent = done ? `Season complete. First to ${League.leagueTarget()}.`
+    : `Round ${league.round + 1} of ${league.schedule.length} · first to ${League.leagueTarget()}. `
+      + [above && `Top ${League.UP} go up to the ${above}`, below && `bottom ${League.DOWN} go down to the ${below}`].filter(Boolean).join(', ') + '.';
+  // Start of a season: what happened at the end of the last one
+  const moves = summary && league.round === 0 && !lastRound;
+  $('#lgMovesWrap').hidden = !moves;
+  if (moves) {
+    const line = (t, dir) => summary.moves.filter(m => m.to === t && (dir === 'up' ? m.from > t : m.from < t));
+    $('#lgMoves').innerHTML = [0, 1, 2].flatMap(t => [
+      line(t, 'up').length ? `<div>Up to the ${League.tierName(t)}: ${line(t, 'up').map(m => who(m)).join(', ')}</div>` : '',
+      line(t, 'down').length ? `<div>Down to the ${League.tierName(t)}: ${line(t, 'down').map(m => who(m)).join(', ')}</div>` : '',
+    ]).join('') + `<div class="champs">Champions: ${summary.champions.map((n, t) => `${League.tierName(t)} <b>${esc(n)}</b>`).join(' · ')}</div>`;
+  }
   $('#lgResultsWrap').hidden = !lastRound;
   if (lastRound) {
     $('#lgResultsLabel').textContent = `Round ${lastRound.round} results`;
     $('#lgResults').innerHTML = lastRound.games.map(g => {
-      const A = league.entries[g.a].name, B = league.entries[g.b].name;
-      return `<div><span>${g.aw ? `<b>${A}</b>` : A}</span><span>${g.sa}–${g.sb}</span><span style="text-align:right">${g.aw ? B : `<b>${B}</b>`}</span></div>`;
+      const A = league.entries[g.a], B = league.entries[g.b];
+      return `<div><span>${g.aw ? `<b>${who(A)}</b>` : who(A)}</span><span>${g.sa}–${g.sb}</span><span style="text-align:right">${g.aw ? who(B) : `<b>${who(B)}</b>`}</span></div>`;
     }).join('');
   }
   $('#lgTable').innerHTML = '<tr><th>#</th><th>Player</th><th>P</th><th>W</th><th>L</th><th>+/−</th></tr>' +
-    League.standings().map(({ e }, pos) => `<tr class="${e.human ? 'me' : ''}"><td>${pos + 1}</td><td>${e.name}${e.human ? '' : `<span class="skill" title="Skill">${dots(e.skill)}</span>`}</td>
+    League.standings().map(({ e }, pos) => `<tr class="${e.human ? 'me' : ''} ${League.zone(pos)}"><td>${pos + 1}</td><td>${who(e)}${e.human ? '' : `<span class="skill" title="Skill">${dots(e.skill)}</span>`}</td>
       <td>${e.P}</td><td>${e.W}</td><td>${e.L}</td><td>${e.PF - e.PA > 0 ? '+' : ''}${e.PF - e.PA}</td></tr>`).join('');
+  $('#lgKey').innerHTML = [above && '<span class="up">Promotion</span>', below && '<span class="down">Relegation</span>'].filter(Boolean).join('');
   if (done) {
-    const table = League.standings(), champ = table[0].e, myPos = table.findIndex(x => x.e.human) + 1;
-    $('#lgNext').innerHTML = champ.human ? '<b>You are the champion!</b>' : `<b>${champ.name}</b> wins the league. You finished ${ordinal(myPos)}.`;
+    const table = League.standings(), pos = table.findIndex(x => x.e.human), champ = table[0].e, z = League.zone(pos);
+    $('#lgNext').innerHTML = (champ.human ? `<b>Champions of the ${League.tierName(tier)}!</b> ` : `${who(champ)} wins the ${League.tierName(tier)}. You finished ${ordinal(pos + 1)}. `)
+      + (z === 'up' ? `You’re promoted to the <b>${above}</b>.` : z === 'down' ? `You’re relegated to the <b>${below}</b>.` : tier === 0 && champ.human ? 'The best there is.' : `You stay in the ${League.tierName(tier)}.`);
     $('#lgPlay').textContent = 'Next season';
   } else {
-    const opp = league.entries[League.myOpponent()];
-    $('#lgNext').innerHTML = `Next: <b>You</b> vs <b>${opp.name}</b> <span style="color:var(--muted)">(skill ${dots(opp.skill)})</span>`;
+    const opp = league.entries[League.myOpponent()], b = botById(opp.bot);
+    $('#lgNext').innerHTML = `<div class="opp">${faceSVG(opp.bot, 44)}<div>Next: <b>You</b> vs <b>${esc(opp.name)}</b> <span class="skill">${dots(opp.skill)}</span>
+      <div class="style">“${esc(b.style)}”</div></div></div>`;
     $('#lgPlay').textContent = 'Play match';
   }
-  showMilkKing($('#lgKing'), done && League.standings()[0].e.human);
+  showMilkKing($('#lgKing'), done && tier === 0 && League.standings()[0].e.human); // only for winning the Premier League
 }
 function openLeague() {
-  if (!League.lg.league) League.newLeague(1, chosenTarget);
+  if (!League.lg.league) League.newCareer(chosenTarget);
   ['#setup', '#over'].forEach(s => $(s).hidden = true);
   state = 'menu'; renderLeague(); $('#league').hidden = false;
 }
 function playLeagueMatch() {
   const { league } = League.lg;
-  if (League.seasonDone()) { chosenTarget = League.leagueTarget(); League.newLeague(league.season + 1, chosenTarget); renderLeague(); return; }
+  if (League.seasonDone()) { League.nextSeason(); renderLeague(); return; }
   const oi = League.myOpponent(), opp = league.entries[oi];
   mode = 'league'; leagueMatch = { oi, round: league.round }; game.target = League.leagueTarget();
-  game.players = [newPlayer('You', null, COLORS[0]), newPlayer(opp.name, opp.ai, COLORS[1])];
+  game.players = [newPlayer('You', null, COLORS[0]), { ...newPlayer(opp.name, opp.ai, COLORS[1]), bot: opp.bot }];
   launch(league.round % 2); // alternate who throws first
 }
 function finishLeagueMatch() {
@@ -477,7 +497,7 @@ function renderLobby() {
   // Played at leisure, people are often away; that's not worth marking.
   const away = s => !s.connected && !slow;
   $('#lbSeats').innerHTML = r.seats.map((s, i) => `
-    <div class="slot ${away(s) ? 'away' : ''}"><span><i class="sw" style="background:${s.color}"></i>${esc(s.name)}
+    <div class="slot ${away(s) ? 'away' : ''}"><span>${s.bot ? faceSVG(s.bot, 22) : `<i class="sw" style="background:${s.color}"></i>`}${esc(s.name)}
       ${i === r.you ? '<small>(you)</small>' : ''}${i === r.host ? '<small>· host</small>' : ''}${s.cpu ? `<small>· ${s.cpu}</small>` : ''}${away(s) ? '<small>· away</small>' : ''}</span>
       ${host && s.cpu ? `<button data-rm="${i}" aria-label="Remove ${esc(s.name)}">Remove</button>` : ''}</div>`).join('');
   $('#lbAdd').hidden = !host || n >= r.maxSeats;
@@ -875,7 +895,7 @@ $('#againBtn').onclick = () => {
 $('#leagueBtn').onclick = openLeague;
 $('#lgPlay').onclick = playLeagueMatch;
 $('#lgMenu').onclick = () => { $('#league').hidden = true; $('#setup').hidden = false; };
-$('#lgReset').onclick = () => { if (confirm(`Start a new league to ${chosenTarget}? The current table will be lost.`)) { League.newLeague(1, chosenTarget); renderLeague(); } };
+$('#lgReset').onclick = () => { if (confirm(`Start over from the Sunday League, playing to ${chosenTarget}? Your career so far will be lost.`)) { League.newCareer(chosenTarget); renderLeague(); } };
 $('#onlineBtn').onclick = () => openOnline();
 $('#overNew').onclick = () => {
   if (mode === 'online') return leaveOnline();

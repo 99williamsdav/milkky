@@ -8,8 +8,6 @@ export const LEVELS = {
   medium: { aimSd: 0.028, distSd: 0.06, think: 'risk' },
   hard:   { aimSd: 0.014, distSd: 0.035, think: 'risk' },
 };
-// Names for computer players (the local league, and online bots)
-export const BOT_NAMES = ['Aino', 'Eero', 'Helmi', 'Juhani', 'Kaisa', 'Lauri', 'Mikko', 'Noora', 'Onni', 'Pirkko', 'Ritva', 'Tapio', 'Veikko', 'Sanna', 'Ilmari', 'Venla'];
 export function aiFromSkill(sk) {
   return { aimSd: 0.065 - sk * 0.053, distSd: 0.12 - sk * 0.088, think: sk < 0.3 ? 'basic' : 'risk' };
 }
