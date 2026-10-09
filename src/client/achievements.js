@@ -18,6 +18,7 @@ export const ACHIEVEMENTS = [
   { id: 'flawless', group: 'Winning', name: 'Flawless', desc: 'Win a game without a single miss' },
   { id: 'speedDemon', group: 'Winning', name: 'Speed Demon', desc: 'Win a game to 50 in 8 throws or fewer' },
   { id: 'countdown', group: 'Winning', name: 'Countdown', desc: 'Score 12, 11, 10 with three throws in a row' },
+  { id: 'glancingBlow', group: 'Funny ones', name: 'Glancing Blow', desc: 'Hit a bottle with the stick but knock nothing over' },
   { id: 'butterfingers', group: 'Funny ones', name: 'Butterfingers', desc: 'Go out with three misses in a row' },
   { id: 'yoyo', group: 'Funny ones', name: 'Yo-Yo', desc: 'Go over the target three times in one game' },
   { id: 'soClose', group: 'Funny ones', name: 'So Close', desc: 'Lose a game when you needed just 1 point' },
@@ -86,6 +87,7 @@ export function thrown(t) {
     if (FRONT.every(n => f.includes(n))) unlock('bowlingAlley');
     if (p.recent.join() === '12,11,10') unlock('countdown');
     if (p.overs >= 3) unlock('yoyo');
+    if (t.hit && !f.length) unlock('glancingBlow');
     if (t.players[t.who].out) unlock('butterfingers');
   }
   if (!t.over) return;

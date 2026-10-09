@@ -66,7 +66,7 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `turn` | `match`, `cur`, `deadline?` (ms left), `cpu?{aim, target}`, `standIn?` |
 | `status` | `match`, `game` (someone dropped, came back or left) |
 | `aim` | `match`, `aim`, `pull` |
-| `throw` | `match`, `seq`, `seat`, `dist`, `aim`, `fps`, `bodies`, `frames`, `fallen`, `msg`, `restand[[i, x, z]]`, `poses`, `game`, `over` |
+| `throw` | `match`, `seq`, `seat`, `dist`, `aim`, `fps`, `bodies`, `frames`, `fallen`, `hit` (`{num, top}` the stick's first bottle touch, or null), `msg`, `restand[[i, x, z]]`, `poses`, `game`, `over` |
 | `error` | `msg` |
 
 - `phase`: single game `lobby` → `playing` → `over`; league `lobby` → `playing` ⇄ `between` → `over`.
