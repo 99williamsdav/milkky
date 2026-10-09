@@ -13,7 +13,8 @@ const OLD_KEY = 'milkky-league-v1'; // the earlier one-league version, replaced 
 export const UP = 2, DOWN = 2; // promoted and relegated each season
 const BOTTOM = TIERS.length - 1;
 
-// career: { season, tier (0 = Premier League), tiers: [bot ids per league, top first; yours without you] }
+// career: { season, tier (0 = Premier League), tiers: [bot ids per league, top first; yours without you],
+//   promotedIn: the last season you were promoted (for promotions in a row) }
 // league: this season's league; entries[0] is you. summary: what happened at the end of last season.
 // cup: this season's cup (see below).
 export const lg = { career: null, league: null, lastRound: null, summary: null, cup: null };
@@ -47,6 +48,8 @@ export const leagueTarget = () => lg.league.target || 50;
 export const leagueDone = () => lg.league.round >= lg.league.schedule.length;
 export const seasonDone = () => leagueDone() && cupDone();
 export const tierName = t => TIERS[t];
+// The league a bot is in this season (0 = Premier League)
+export const tierOf = id => lg.career.tiers.findIndex(ids => ids.includes(id));
 const rank = entries => entries.map((e, i) => ({ e, i })).sort((a, b) =>
   b.e.W - a.e.W || (b.e.PF - b.e.PA) - (a.e.PF - a.e.PA) || b.e.PF - a.e.PF);
 export const standings = () => rank(lg.league.entries);
@@ -170,8 +173,10 @@ export function nextSeason() {
     return [...fromAbove, ...stay, ...fromBelow];
   });
   const myPos = order[c.tier].indexOf(YOU), newTier = tiers.findIndex(ids => ids.includes(YOU));
+  const promoted = newTier < c.tier, inARow = promoted && c.promotedIn === c.season - 1;
+  if (promoted) c.promotedIn = c.season;
   lg.summary = {
-    season: c.season, tier: c.tier, pos: myPos + 1, newTier,
+    season: c.season, tier: c.tier, pos: myPos + 1, newTier, promoted, inARow,
     champions: champions.map(id => (id === YOU ? 'You' : botById(id).name)),
     cup: { winner: cupName(lg.cup.winner), bot: lg.cup.winner === YOU ? null : lg.cup.winner, out: lg.cup.out && { round: lg.cup.out.round, by: cupName(lg.cup.out.by) } },
     moves: moves.filter(m => m.id !== YOU).map(m => ({ name: botById(m.id).name, bot: m.id, from: m.from, to: m.to })),

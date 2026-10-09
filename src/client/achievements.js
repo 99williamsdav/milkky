@@ -23,6 +23,8 @@ export const ACHIEVEMENTS = [
   { id: 'yoyo', group: 'Funny ones', name: 'Yo-Yo', desc: 'Go over the target three times in one game' },
   { id: 'soClose', group: 'Funny ones', name: 'So Close', desc: 'Lose a game when you needed just 1 point' },
   { id: 'goingUp', group: 'Career', name: 'Going Up', desc: 'Win your first promotion' },
+  { id: 'backToBack', group: 'Career', name: 'Back to Back', desc: 'Win promotion two seasons in a row' },
+  { id: 'underdogs', group: 'Career', name: 'Underdogs', desc: 'Win a cup game against a player from a higher league' },
   { id: 'invincible', group: 'Career', name: 'Invincible', desc: 'Win every league game in a season' },
   { id: 'giantKiller', group: 'Career', name: 'Giant Killer', desc: 'Knock a Premier League player out of the cup while you’re in the Sunday League' },
   { id: 'cupWinner', group: 'Career', name: 'Cup Winner', desc: 'Win the cup' },

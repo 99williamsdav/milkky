@@ -341,7 +341,8 @@ function playLeagueMatch() {
   if (League.seasonDone()) {
     League.nextSeason();
     const sm = League.lg.summary;
-    if (sm.newTier < sm.tier) Achv.unlock('goingUp');
+    if (sm.promoted) Achv.unlock('goingUp');
+    if (sm.inARow) Achv.unlock('backToBack');
     renderLeague(); return;
   }
   if (League.nextEvent() === 'cup') {
@@ -360,6 +361,8 @@ function finishLeagueMatch() {
   if (leagueMatch.cup) {
     // Giant Killer: knocking a Premier League player (they had a bye) out of the cup from the Sunday League
     if (won && league.tier === 2 && cup.byes.includes(bot.bot)) Achv.unlock('giantKiller');
+    // Underdogs: beating anyone from a league above yours
+    if (won && League.tierOf(bot.bot) < league.tier) Achv.unlock('underdogs');
     League.finishCupTie(me.score, bot.score, won);
   } else League.finishRound(leagueMatch.oi, me.score, bot.score, won);
   leagueMatch = null; mode = 'quick';
