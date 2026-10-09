@@ -1012,12 +1012,16 @@ function nextAchievement() {
   setTimeout(() => { el.classList.remove('show'); setTimeout(nextAchievement, 400); }, 3800);
 }
 Achv.onUnlocked(a => { achvQueue.push(a); if (!achvShowing) nextAchievement(); refreshAchBtn(); });
-function refreshAchBtn() { $('#achBtn').textContent = `Achievements · ${Achv.count()}/${Achv.ACHIEVEMENTS.length}`; }
+function refreshAchBtn() { $('#achBtn').innerHTML = `${TROPHY(false, 22)}Achievements · ${Achv.count()}/${Achv.ACHIEVEMENTS.length}`; }
+// Locked achievements stay a mystery: a padlock and question marks until you earn them
+const LOCK = `<svg class="lock" viewBox="0 0 40 40" aria-hidden="true"><rect x="9" y="18" width="22" height="16" rx="3" fill="#c9c4b8" stroke="#8a8578" stroke-width="2"/><path d="M14 18v-5a6 6 0 0 1 12 0v5" fill="none" stroke="#8a8578" stroke-width="2.5"/><circle cx="20" cy="26" r="2.2" fill="#8a8578"/></svg>`;
 function openAchievements() {
   const got = Achv.unlocked(), when = t => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   $('#achvSub').textContent = `${Achv.count()} of ${Achv.ACHIEVEMENTS.length} unlocked.`;
   $('#achvList').innerHTML = Achv.GROUPS.map(g => `<div class="sectionlabel">${g}</div>` + Achv.ACHIEVEMENTS.filter(a => a.group === g).map(a =>
-    `<div class="ach ${got[a.id] ? '' : 'locked'}">${TROPHY(!got[a.id], 30)}<span class="t"><b>${esc(a.name)}</b><span class="d">${esc(a.desc)}</span></span>${got[a.id] ? `<time>${when(got[a.id])}</time>` : ''}</div>`).join('')).join('');
+    got[a.id]
+      ? `<div class="ach">${TROPHY(false, 30)}<span class="t"><b>${esc(a.name)}</b><span class="d">${esc(a.desc)}</span></span><time>${when(got[a.id])}</time></div>`
+      : `<div class="ach locked" aria-label="Locked achievement">${LOCK}<span class="t"><b>???</b><span class="d">Locked</span></span></div>`).join('')).join('');
   $('#setup').hidden = true; $('#achv').hidden = false;
 }
 $('#achBtn').onclick = openAchievements;

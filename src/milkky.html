@@ -181,6 +181,10 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #achvPop b{font-size:18px;font-weight:800}
 #achvPop .d{font-size:13px;color:var(--muted)}
 .trophy{flex:none}
+/* The main menu's Achievements button, on its own row */
+.achbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;border-color:#d4a017}
+.achbtn .trophy{margin:-4px 0}
+#achvList .lock{flex:none;width:30px;height:30px}
 #achvList .ach{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
 #achvList .ach.locked{opacity:.5}
 #achvList .ach .t{display:flex;flex-direction:column;min-width:0;flex:1}
@@ -267,7 +271,8 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <button data-n="1">1</button><button data-n="2" aria-pressed="true">2</button><button data-n="3">3</button><button data-n="4">4</button>
       </div>
       <div id="slots"></div>
-      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="achBtn">Achievements</button><button id="setupRules">Rules</button></div>
+      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="setupRules">Rules</button></div>
+      <button class="achbtn" id="achBtn">Achievements</button>
     </div>
   </div>
 
