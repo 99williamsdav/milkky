@@ -160,6 +160,11 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 #lgMovesWrap[hidden]{display:none}
 #lgMoves{font-size:14px;margin:0 0 6px;display:flex;flex-direction:column;gap:4px}
 #lgMoves .champs{color:var(--muted);font-size:13px}
+#lgCupStatus{font-size:14px;margin:0 0 6px}
+#lgCupResultsLabel:empty{display:none}
+#lgCupResults{font-size:14px;margin:0 0 12px}
+#lgCupResults div{display:flex;justify-content:space-between;gap:8px;padding:3px 0}
+#lgCupResults b{font-weight:800}
 #lgNext .opp{display:flex;align-items:center;gap:10px}
 #lgNext .style{color:var(--muted);font-size:13px;font-style:italic;margin-top:2px}
 #lgNext .skill{color:var(--muted);font-size:11px;letter-spacing:1px}
@@ -282,6 +287,10 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div class="sectionlabel">Table</div>
       <div class="tablewrap"><table class="lgtable" id="lgTable"></table></div>
       <div id="lgKey"></div>
+      <div class="sectionlabel" id="lgCupLabel">Cup</div>
+      <p id="lgCupStatus"></p>
+      <div class="sectionlabel" id="lgCupResultsLabel"></div>
+      <div id="lgCupResults"></div>
       <div id="lgNext"></div>
       <div class="row"><button class="primary" id="lgPlay">Play match</button><button id="lgMenu">Menu</button><button id="lgReset">Start over</button></div>
     </div>
