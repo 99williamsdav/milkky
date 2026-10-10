@@ -416,7 +416,7 @@ function exitOnline() {
   online = null; mode = 'quick'; cpu = null; aimLine.visible = false; tween = null; physicsOn = true;
   physics.removeStick(); resetBottles(); setStickHeld(); state = 'menu';
   $('#newBtn').textContent = 'New game'; $('#board').innerHTML = '';
-  $('#ticker').hidden = true; $('#hubBtn').hidden = true; $('#watchers').hidden = true;
+  $('#ticker').hidden = true; $('#hubBtn').hidden = true; $('#watchers').hidden = true; showEmotes(false);
   ['#online', '#lobby', '#over', '#hub', '#mine'].forEach(s => $(s).hidden = true);
   setRoomParam(null);
 }
@@ -477,6 +477,7 @@ function onNet(m) {
       return;
     case 'room': return onRoom(m);
     case 'watchers': return setWatchers(m.match, m.names);
+    case 'emote': return m.match === online.watching && ['game', 'watch'].includes(online.view) && showEmote(m);
     case 'fixtures': // live scores during a league round
       online.fixtures = m.fixtures;
       renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
@@ -514,7 +515,7 @@ function onGameMessage(m) {
       return;
     case 'status': // someone dropped, came back, or left
       m.game.players.forEach((p, i) => { if (game.players[i]) Object.assign(game.players[i], { away: p.away, left: p.left }); });
-      return renderBoard();
+      renderBoard(); return refreshEmotes();
     case 'turn':
       online.queue.push(stampTurn(m)); break;
     case 'throw':
@@ -564,7 +565,7 @@ function onNetStatus(s) {
 
 // Who's watching our game: a note when someone starts, and a reminder under the scores while they're there
 function setWatchers(match, names, announce = true) {
-  if (match !== online.myMatch) return;
+  if (match !== online.watching) return;
   const arrived = names.filter(n => !online.watchers.includes(n));
   online.watchers = names;
   if (announce && arrived.length && online.view === 'game') {
@@ -574,11 +575,49 @@ function setWatchers(match, names, announce = true) {
   renderWatchers();
 }
 function renderWatchers() {
+  refreshEmotes();
   const el = $('#watchers'), names = online?.watchers || [];
   el.hidden = !names.length || online.view !== 'game';
   if (el.hidden) return;
   el.textContent = names.length > 2 ? `${names.length} watching` : `${names.join(' and ')} watching`;
   el.title = names.join(', ');
+}
+
+// Emotes: quick faces for everyone in the game, when there's another person to see them
+// (a person playing in it, or someone watching)
+const EMOJI = { smile: '😊', laugh: '😂', sad: '😢', angry: '😠' };
+function hasCompany() {
+  if (!online || !game || !['game', 'watch'].includes(online.view)) return false;
+  const people = game.players.filter(p => !p.cpu && !p.left && p.seat !== online.seat).length;
+  const watchers = online.watchers.length - (online.view === 'watch' ? 1 : 0); // (we're one of them)
+  return people + watchers > 0;
+}
+function refreshEmotes() { showEmotes(hasCompany()); }
+function showEmotes(on) {
+  $('#emoteBtn').hidden = !on;
+  if (!on) setTray(false);
+}
+function setTray(open) {
+  $('#emoteTray').hidden = !open; $('#emoteBtn').setAttribute('aria-expanded', open);
+}
+$('#emoteBtn').onclick = () => setTray($('#emoteTray').hidden);
+$('#emoteTray').onclick = e => {
+  const b = e.target.closest('button[data-e]');
+  if (!b || !online?.watching) return;
+  net.send({ t: 'emote', match: online.watching, e: b.dataset.e });
+  setTray(false);
+};
+// Float someone's emote up the side of the screen, with their name in their colour
+function showEmote(m) {
+  const p = game?.players.find(q => q.seat === m.seat);
+  const el = document.createElement('div');
+  el.className = 'emote';
+  el.innerHTML = `<span class="face">${EMOJI[m.e]}</span><span class="who"></span>`;
+  el.querySelector('.who').textContent = m.seat === online.seat ? 'You' : m.name;
+  if (p) el.querySelector('.who').style.color = p.color;
+  el.style.left = `${8 + Math.random() * 14}%`;
+  $('#emoteFeed').append(el);
+  setTimeout(() => el.remove(), 2600);
 }
 
 // Lobby
@@ -708,7 +747,7 @@ function snapPoses(poses) {
 function onlineSync(m) {
   ['#lobby', '#over', '#online', '#setup', '#league', '#hub'].forEach(s => $(s).hidden = true);
   online.view = m.match === online.myMatch ? 'game' : 'watch';
-  if (online.view === 'game') { online.watchers = []; setWatchers(m.match, m.watchers || [], false); } else renderWatchers();
+  online.watchers = []; setWatchers(m.match, m.watchers || [], false);
   online.play = online.pending = null; online.overQueued = false; online.turnEndsAt = null;
   tween = null; cpu = null; aimLine.visible = false; landRing.visible = false; dragging = false;
   physics.removeStick();
@@ -716,7 +755,7 @@ function onlineSync(m) {
   applyGame(m.game); snapPoses(m.poses); setStickHeld();
   // Achievements count in our own game; joining partway (a rejoin) doesn't count as the opening throw
   if (online.view === 'game') Achv.gameStarted(game.players.map((p, i) => isMe(i)), { midway: m.t === 'sync' }); else Achv.gameLeft();
-  state = 'remote'; renderBoard();
+  state = 'remote'; renderBoard(); refreshEmotes();
   $('#hubBtn').hidden = online.room?.mode !== 'league';
   renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
   if (m.t === 'sync' && m.over) return online.view === 'watch' ? showHub() : null;

@@ -18,6 +18,7 @@ const TARGETS = [20, 30, 50];
 const PACES = ['live', 'async'];
 const CPU_LEVELS = Object.keys(LEVELS);
 const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
+const EMOTES = ['smile', 'laugh', 'sad', 'angry'], EMOTE_GAP = 600; // ms between one player's emotes
 const LOBBY_GRACE = 60_000; // live: ms a disconnected player keeps their lobby seat, so a refresh doesn't lose it
 const BETWEEN_ROUNDS = env('MILKKY_BETWEEN_SECONDS', 20) * 1000;  // live league: pause between rounds
 const ASYNC_BETWEEN_ROUNDS = env('MILKKY_ASYNC_BETWEEN_SECONDS', 120) * 1000; // async league: the same, a little longer
@@ -241,6 +242,14 @@ export class Room {
         target.spectators.add(seat);
         this.send(seat, target.syncState());
         return target.watchersChanged();
+      }
+      case 'emote': { // a quick face to everyone in the game you're playing or watching
+        const match = this.matches.find(x => x.id === m.match);
+        if (!match || !EMOTES.includes(m.e) || !match.audience().has(seat)) return;
+        const now = Date.now();
+        if (now - (seat.lastEmote || 0) < EMOTE_GAP) return;
+        seat.lastEmote = now;
+        return match.send({ t: 'emote', e: m.e, name: seat.name, seat: this.seatIndex(seat) });
       }
       case 'aim': return this.matchOf(seat)?.aim(seat, m);
       case 'throw': {

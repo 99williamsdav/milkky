@@ -50,6 +50,7 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `next` | | host: start the next league round now |
 | `watch` | `match` (or null to stop) | watch another fixture; replies with its `sync` (your own match: back into it) |
 | `aim` | `aim`, `pull` | current thrower's live aim, relayed to others |
+| `emote` | `match`, `e` (`smile`/`laugh`/`sad`/`angry`) | a quick face to everyone playing or watching that game (at most one every 0.6 s) |
 | `throw` | `dist` (m), `aim` (rad) | current thrower; clamped to 0.5–9.5 m and ±0.55 rad |
 
 `leave?` on `create`/`join` is the `{ code, token }` of a seat held in another room. It is given up only once the new room has let you in.
@@ -68,6 +69,7 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `status` | `match`, `game` (someone dropped, came back or left) |
 | `watchers` | `match`, `names` (who is watching this game; sent to its players and watchers when it changes) |
 | `aim` | `match`, `aim`, `pull` |
+| `emote` | `match`, `e`, `name`, `seat` (someone in the game, or watching it, sent a face) |
 | `throw` | `match`, `seq`, `seat`, `dist`, `aim`, `fps`, `bodies`, `frames`, `fallen`, `hit` (`{num, top}` the stick's first bottle touch, or null), `msg`, `restand[[i, x, z]]`, `poses`, `game`, `over` |
 | `error` | `msg` |
 

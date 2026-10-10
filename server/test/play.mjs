@@ -64,6 +64,17 @@ A.send({ t: 'start' });
 const started = await B.next(is('start'));
 check(started.game.players.length === 3 && started.poses.length === 12, 'game starts with 3 players and 12 bottles');
 
+// Emotes go to everyone in the game; unknown ones, other games and spamming are ignored
+A.send({ t: 'emote', match: started.match, e: 'laugh' });
+const emote = await B.next(is('emote'));
+check(emote.e === 'laugh' && emote.seat === 0 && emote.name && emote.match === started.match, 'an emote reaches the other player');
+await A.next(is('emote'));
+A.send({ t: 'emote', match: started.match, e: 'sad' }); // too soon after the last
+B.send({ t: 'emote', match: started.match, e: 'rude' });
+B.send({ t: 'emote', match: 'nope', e: 'sad' });
+await new Promise(r => setTimeout(r, 300));
+check(![...A.inbox, ...B.inbox].some(m => m.t === 'emote'), 'emotes sent too fast, unknown, or to another game are dropped');
+
 let wrongTurnChecked = false, badThrowChecked = false, rejoinChecked = false, throwsSeen = 0;
 const me = { 0: A, 1: B };
 for (;;) {
