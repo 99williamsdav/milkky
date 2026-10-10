@@ -8,7 +8,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { LEVELS } from '../src/shared/ai.js';
 import { ROSTER, botsForLevel } from '../src/shared/roster.js';
-import { roundRobin } from '../src/shared/schedule.js';
+import { roundRobin, peopleLast } from '../src/shared/schedule.js';
 import { Match, TURN_TIME, ASYNC_TURN_TIME } from './match.js';
 import * as store from './store.js';
 
@@ -276,7 +276,9 @@ export class Room {
     const entry = seat => ({ seat, P: 0, W: 0, L: 0, PF: 0, PA: 0 });
     const entries = this.seats.map(entry);
     if (entries.length % 2) entries.push(entry(this.newBot('medium', { filler: true })));
-    this.league = { entries, schedule: roundRobin(entries.length), round: -1, results: [] };
+    // People play each other in the final rounds; their earlier games are against the bots
+    const schedule = peopleLast(entries.map(e => !e.seat.cpu), roundRobin(entries.length));
+    this.league = { entries, schedule, round: -1, results: [] };
     this.startRound();
   }
   startRound() {

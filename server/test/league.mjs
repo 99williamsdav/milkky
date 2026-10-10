@@ -51,6 +51,8 @@ const lg = final.league;
 console.log('\nFinal table:\n' + lg.table.map((e, i) => `  ${i + 1}. ${e.name.padEnd(18)} P${e.P} W${e.W} L${e.L} ${e.PF}:${e.PA}`).join('\n'));
 check(lg.rounds === 3 && lg.table.length === 4, '3 players plus a filler make 4 entries and 3 rounds');
 check(lg.table.every(e => e.P === 3), 'everyone played everyone once');
+const humansGame = lg.results.find(r => [r.a, r.b].sort().join() === 'Alice,Bob');
+check(humansGame?.round === lg.rounds, `the two people play each other in the last round (round ${humansGame?.round} of ${lg.rounds})`);
 check(lg.table.reduce((n, e) => n + e.W, 0) === 6 && lg.results.length === 6, '6 fixtures, 6 winners');
 check(lg.table.filter(e => e.cpu).length === 2 && lg.table.every(e => !e.cpu || / \(bot\)$/.test(e.name)) && lg.table.some(e => e.cpu === 'medium' && e.seat === -1),
   `a bot filler evened the numbers, and bots are named as bots (${lg.table.filter(e => e.cpu).map(e => e.name).join(', ')})`);
