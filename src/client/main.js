@@ -912,7 +912,7 @@ $('#mineCopy').onclick = async () => {
 // Target practice: the bottles are cleared away and a target appears somewhere on the lawn. Ten throws, each
 // scored on how close the stick first lands to the middle of it.
 const TRAIN_THROWS = 10, TRAIN_BEST_KEY = 'milkky-training-best';
-let training = null; // { throws: [{ d, pts }], target: where it is, land: where the stick first touched down }
+let training = null; // { throws: [{ d, pts, long, side }], target: where it is, land: where the stick first touched down }
 const targetMesh = (() => {
   // Red and white rings, 10 cm apart, 1 m across
   const c = document.createElement('canvas'); c.width = c.height = 256;
@@ -930,8 +930,8 @@ const TARGET_R = 0.5, BULL_R = 0.1;
 const trainPoints = d => Math.round(10 * THREE.MathUtils.clamp((TARGET_R - d) / (TARGET_R - BULL_R), 0, 1));
 const distText = d => d < 1 ? `${Math.round(d * 100)} cm` : `${d.toFixed(2)} m`;
 const trainTotal = () => training.throws.reduce((s, t) => s + t.pts, 0);
-// Aim (left/right) and length (long/short) marked separately out of 100: 1 m off scores nothing
-const partScore = errs => Math.round(errs.reduce((s, e) => s + Math.max(0, 100 - Math.abs(e) * 100), 0) / errs.length);
+// Aim (left/right) and length (long/short) marked separately, each throw out of 10 like the points
+const partScore = errs => errs.reduce((s, e) => s + trainPoints(Math.abs(e)), 0);
 const meanAbs = errs => errs.reduce((s, e) => s + Math.abs(e), 0) / errs.length;
 // Which way you tend to miss, if there's a clear pattern (more than 10 cm on average)
 function tendency(errs, plus, minus) {
@@ -998,7 +998,7 @@ function showTrainingResult() {
   $('#trStats').innerHTML = stat('Points', `${total} / ${TRAIN_THROWS * 10}`) + stat('Average distance', distText(avg))
     + stat('Best throw', `${distText(best.d)} (+${best.pts})`) + stat('Personal best', `${Math.max(total, prev)} pts`);
   const sides = ts.map(t => t.side), longs = ts.map(t => t.long);
-  const part = (label, errs, plus, minus) => `<div><span>${label}</span><b>${partScore(errs)}<small> / 100</small></b>
+  const part = (label, errs, plus, minus) => `<div><span>${label}</span><b>${partScore(errs)}<small> / ${TRAIN_THROWS * 10}</small></b>
     <em>${distText(meanAbs(errs))} off on average, ${tendency(errs, plus, minus)}</em></div>`;
   $('#trParts').innerHTML = part('Aim (left / right)', sides, 'right', 'left') + part('Length (long / short)', longs, 'long', 'short');
   $('#trThrows').innerHTML = ts.map((t, i) => `<div><span>${i + 1}</span><span>${distText(t.d)}<em>${missText(t)}</em></span><b>+${t.pts}</b></div>`).join('');

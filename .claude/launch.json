@@ -1,1 +1,0 @@
-{ "version": "0.0.1", "configurations": [ { "name": "milkky-test", "runtimeExecutable": "node", "runtimeArgs": ["C:/Users/99wil/AppData/Local/Temp/claude/C--Projects-milkky/3dae9123-c54a-488c-b7da-a7f5b64a60c0/scratchpad/serve.mjs"], "port": 5178 } ] }
