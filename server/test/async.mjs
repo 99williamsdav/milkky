@@ -4,7 +4,7 @@ import { startServer, checks, client, is, sleep } from './helpers.mjs';
 
 const PORT = 8095;
 // Short live timers prove they don't apply to async games; an 8 s round stands in for a day.
-const srv = await startServer(PORT, { MILKKY_TURN_SECONDS: '2', MILKKY_AWAY_SECONDS: '1', MILKKY_ROUND_SECONDS: '8' });
+const srv = await startServer(PORT, { MILKKY_TURN_SECONDS: '2', MILKKY_AWAY_SECONDS: '1', MILKKY_ROUND_SECONDS: '8', MILKKY_ASYNC_BETWEEN_SECONDS: '1' });
 const { check, finish } = checks(srv, 180_000);
 
 const KEYS = { Alice: 'alice-key-0123456789abcdef', Bob: 'bob-key-0123456789abcdef' };
@@ -75,8 +75,10 @@ const B1 = await visit('Bob', { join: true, throwsLeft: 0 }); // following the l
 check(B1.joined.you === B0.joined.you && B1.joined.token === B0.joined.token, 'following the room link again gets Bob his own seat back');
 away(B1);
 
-// The deadline passes: bots finish Bob's game, and round 2 starts.
-await sleep(8000);
+// The deadline passes: bots finish Bob's game, there's a pause to look at the table, and round 2 starts.
+let paused = false;
+for (let i = 0; i < 60; i++) { await sleep(200); const g = await mine('Alice'); if (g.phase === 'between') paused = true; if (g.league.round === 2 && g.phase === 'playing') break; }
+check(paused, 'there was a pause between rounds');
 a = await mine('Alice');
 check(a.league.round === 2, `after the deadline, round ${a.league.round} has started`);
 

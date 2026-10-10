@@ -20,7 +20,8 @@ Games are saved to disk (one JSON file per room) and picked up again after a res
 `MILKKY_DATA_DIR`, else systemd's `STATE_DIRECTORY` (see `deploy/milkky-server@.service`), else `server/data`.
 
 Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits), `MILKKY_TURN_SECONDS` (45),
-`MILKKY_AWAY_SECONDS` (10), `MILKKY_BETWEEN_SECONDS` (20, between live league rounds), `MILKKY_ROUND_SECONDS`
+`MILKKY_AWAY_SECONDS` (10), `MILKKY_BETWEEN_SECONDS` (20, between live league rounds), `MILKKY_ASYNC_BETWEEN_SECONDS`
+(120, between async league rounds), `MILKKY_ROUND_SECONDS`
 (86400, longest async league round), `MILKKY_ASYNC_TURN_HOURS` (48, async single game).
 
 ## Code

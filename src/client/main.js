@@ -489,12 +489,21 @@ function onNet(m) {
   }
 }
 function onGameMessage(m) {
+  // A new round's game being held until we press Play: keep what happens in it, to play back then
+  if (online.held && m.match === online.held[0].match) {
+    if (m.t === 'turn' || m.t === 'throw') online.held.push(stampTurn(m));
+    return;
+  }
   if (m.t === 'start' || m.t === 'sync') {
     // Our own match (a new round, or catching up after rejoining), or one we asked to watch
     const mine = m.t === 'start' || m.game.players.some(p => p.seat === online.seat);
     if (mine) online.myMatch = m.match;
     else if (m.match !== online.watching) return; // a game we've since stopped watching
-    online.watching = m.match; online.queue.length = 0;
+    online.watching = m.match;
+    // A new round waits until the last one's final throw has finished playing
+    if (m.t === 'start' && (ANIMATING.includes(state) || online.queue.length)) { online.queue.push(m); return; }
+    if (m.t === 'start' && holdNewRound()) return hold([m]);
+    online.queue.length = 0;
     return onlineSync(m);
   }
   if (m.match !== online.watching) return;
@@ -506,8 +515,7 @@ function onGameMessage(m) {
       m.game.players.forEach((p, i) => { if (game.players[i]) Object.assign(game.players[i], { away: p.away, left: p.left }); });
       return renderBoard();
     case 'turn':
-      if (m.deadline != null) m.endsAt = performance.now() + m.deadline; // time left counts from now, not when it's shown
-      online.queue.push(m); break;
+      online.queue.push(stampTurn(m)); break;
     case 'throw':
       if (m.over) online.overQueued = true;
       online.queue.push(m); break;
@@ -625,7 +633,30 @@ function pumpOnline() {
     const m = online.queue.shift();
     if (m.t === 'turn') onlineTurn(m);
     else if (m.t === 'throw') onlineThrow(m);
+    else if (m.t === 'start') {
+      if (!holdNewRound()) onlineSync(m);
+      else { // take the new game's messages out of the queue too
+        hold([m, ...online.queue.filter(x => x.match === m.match)]);
+        online.queue = online.queue.filter(x => x.match !== m.match);
+      }
+    }
   }
+}
+// A turn's time left counts from when it arrives, not when it's shown
+function stampTurn(m) { if (m.t === 'turn' && m.deadline != null) m.endsAt = performance.now() + m.deadline; return m; }
+// Take-your-time leagues: a new round starting while we're looking at the table doesn't whisk us away.
+// We stay put, and go into the new game with Play (its throws so far play back first).
+const holdNewRound = () => isAsync() && online.view === 'hub';
+function hold(msgs) {
+  online.held = msgs;
+  refreshHub();
+  toast(`Round ${online.room?.league?.round ?? ''} has started. Tap Play when you’re ready.`, 3500, true);
+}
+function playHeld() {
+  const [start, ...rest] = online.held;
+  online.held = null; online.watching = start.match;
+  onlineSync(start);
+  online.queue.push(...rest);
 }
 // Browsers pause the render loop (and throttle timers) in background tabs, so while nothing is being
 // drawn, animations are skipped and messages applied as they arrive. Coming back shows the game as it is now.
@@ -809,7 +840,10 @@ $('#hubBtns').addEventListener('click', e => {
 $('#hubLive').addEventListener('click', e => {
   const b = e.target.closest('button[data-act]');
   if (b?.dataset.act === 'watch') watchMatch(b.dataset.match);
-  if (b?.dataset.act === 'play') { online.watching = b.dataset.match; net.send({ t: 'watch', match: b.dataset.match }); } // back into our own game
+  if (b?.dataset.act === 'play') { // into our own game
+    if (online.held?.[0].match === b.dataset.match) playHeld(); // a new round we've been holding
+    else { online.watching = b.dataset.match; net.send({ t: 'watch', match: b.dataset.match }); }
+  }
 });
 $('#lbPace').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'pace', pace: b.dataset.pace }); });
 

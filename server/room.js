@@ -20,6 +20,7 @@ const CPU_LEVELS = Object.keys(LEVELS);
 const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
 const LOBBY_GRACE = 60_000; // live: ms a disconnected player keeps their lobby seat, so a refresh doesn't lose it
 const BETWEEN_ROUNDS = env('MILKKY_BETWEEN_SECONDS', 20) * 1000;  // live league: pause between rounds
+const ASYNC_BETWEEN_ROUNDS = env('MILKKY_ASYNC_BETWEEN_SECONDS', 120) * 1000; // async league: the same, a little longer
 const ROUND_TIME = env('MILKKY_ROUND_SECONDS', 24 * 3600) * 1000; // async league: longest a round can last
 const RESTART_GRACE = 20_000; // live: after a server restart, extra time for players to reconnect before bots take their turns
 
@@ -316,12 +317,13 @@ export class Room {
     if (lg.round >= lg.schedule.length - 1) {
       this.phase = 'over';
       this.dropAbsentSeats();
-    } else if (this.async) {
-      return this.startRound(); // everyone's done: no need to wait for the deadline
     } else {
+      // A pause to look at the table before the next round (async: everyone's done, so no need to wait
+      // for the deadline, but not straight away either). The host can skip it.
+      const pause = this.async ? ASYNC_BETWEEN_ROUNDS : BETWEEN_ROUNDS;
       this.phase = 'between';
-      this.nextRoundAt = Date.now() + BETWEEN_ROUNDS;
-      this.timer = setTimeout(() => this.startRound(), BETWEEN_ROUNDS);
+      this.nextRoundAt = Date.now() + pause;
+      this.timer = setTimeout(() => this.startRound(), pause);
     }
     this.broadcastRoom();
   }
