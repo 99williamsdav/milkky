@@ -23,7 +23,7 @@ const lobby = await A.next(m => m.t === 'room' && m.mode === 'league' && m.seats
 check(lobby.maxSeats === 8, 'a league room takes up to 8 players');
 
 // Each player throws on their own turns, and watches another fixture once theirs is done.
-const stats = { fixtures: 0, watched: new Set(), rounds: new Set() };
+const stats = { fixtures: 0, watched: new Set(), rounds: new Set(), audience: [] };
 function autoplay(c, name) {
   let mine = null, players = [];
   c.onMessage = m => {
@@ -35,6 +35,7 @@ function autoplay(c, name) {
     if (m.t === 'throw' && m.match === mine && m.over) c.lastFixtures = null, c.send({ t: 'watch', match: c.other?.id });
     if (m.t === 'fixtures' || m.t === 'room') c.other = (m.fixtures || []).find(f => f.id !== mine && !f.over);
     if (m.t === 'sync' && m.match !== mine) stats.watched.add(m.match);
+    if (m.t === 'watchers' && m.match === mine && m.names.length) stats.audience.push(name + ' watched by ' + m.names.join(', '));
   };
 }
 autoplay(A, 'Alice'); autoplay(B, 'Bob');
@@ -58,6 +59,7 @@ check(lg.table.filter(e => e.cpu).length === 2 && lg.table.every(e => !e.cpu || 
   `a bot filler evened the numbers, and bots are named as bots (${lg.table.filter(e => e.cpu).map(e => e.name).join(', ')})`);
 check(stats.rounds.size === 3, `players were sent their fixtures for each round (${[...stats.rounds].join(', ')})`);
 check(stats.fixtures > 6, `live scores were sent during play (${stats.fixtures} updates)`);
+check(stats.audience.some(a => /^(Alice watched by Bob|Bob watched by Alice)$/.test(a)), `players were told who was watching their game (${[...new Set(stats.audience)].join('; ')})`);
 check(stats.watched.size > 0, `players watched other fixtures after finishing (${[...stats.watched].join(', ')})`);
 
 finish();

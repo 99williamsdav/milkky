@@ -214,6 +214,9 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 .hud > .top{pointer-events:none}
 #ticker{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:6px;pointer-events:none}
 #ticker[hidden]{display:none}
+#watchers{width:max-content;max-width:100%;margin:6px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px 3px 26px;font-size:12px;color:var(--muted);pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:8px center;background-size:14px}
+#watchers[hidden]{display:none}
 #ticker span{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;font-variant-numeric:tabular-nums}
 #ticker .lbl{color:var(--muted)}
 .chip .nm small{font-size:11px}
@@ -254,6 +257,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
   <div class="hud">
     <div class="top">
       <div id="board"></div>
+      <div id="watchers" hidden></div>
       <div id="ticker" hidden></div>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>

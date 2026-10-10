@@ -63,9 +63,10 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `room` | `code`, `mode`, `pace`, `phase`, `target`, `host`, `you`, `maxSeats`, `seats[{name, cpu, color, connected, left}]`, `league`, `fixtures` |
 | `fixtures` | `fixtures` (live scores, league only, after every throw) |
 | `start` | `match`, `game`, `poses` (sent to the match's players) |
-| `sync` | `match`, `game`, `poses`, `over`, `turn`, `replay?` (on rejoin, or when you start watching; with `replay` the `throw`s you missed follow, then the current `turn`) |
+| `sync` | `match`, `game`, `poses`, `over`, `turn`, `watchers`, `replay?` (on rejoin, or when you start watching; with `replay` the `throw`s you missed follow, then the current `turn`) |
 | `turn` | `match`, `cur`, `deadline?` (ms left), `cpu?{aim, target}`, `standIn?` |
 | `status` | `match`, `game` (someone dropped, came back or left) |
+| `watchers` | `match`, `names` (who is watching this game; sent to its players and watchers when it changes) |
 | `aim` | `match`, `aim`, `pull` |
 | `throw` | `match`, `seq`, `seat`, `dist`, `aim`, `fps`, `bodies`, `frames`, `fallen`, `hit` (`{num, top}` the stick's first bottle touch, or null), `msg`, `restand[[i, x, z]]`, `poses`, `game`, `over` |
 | `error` | `msg` |

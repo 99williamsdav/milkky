@@ -66,8 +66,12 @@ export class Match {
   }
   // Everything a (re)joining player or new spectator needs to draw this game as it stands
   syncState() {
-    return { t: 'sync', match: this.id, game: this.publicGame(), poses: snapshot(this.physics), over: this.over, turn: this.turnInfo && this.turnNow() };
+    return { t: 'sync', match: this.id, game: this.publicGame(), poses: snapshot(this.physics), over: this.over, turn: this.turnInfo && this.turnNow(),
+      watchers: this.watcherNames() };
   }
+  // Who's watching (so the players know they have an audience)
+  watcherNames() { return [...this.spectators].filter(s => s.connected).map(s => s.name); }
+  watchersChanged() { this.send({ t: 'watchers', names: this.watcherNames() }); }
   // Turn info with the deadline as time remaining, so clients don't depend on their clocks
   turnNow() {
     const t = { ...this.turnInfo };

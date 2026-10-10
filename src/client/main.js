@@ -395,7 +395,7 @@ function enterOnline() {
   mode = 'online'; leagueMatch = null; cpu = null; aimLine.visible = false; tween = null;
   physics.removeStick(); resetBottles(); state = 'menu';
   online = { seat: -1, room: null, view: 'entry', queue: [], play: null, pending: null, overQueued: false,
-    myMatch: null, watching: null, fixtures: null, turnEndsAt: null, nextRoundAt: null };
+    myMatch: null, watching: null, fixtures: null, turnEndsAt: null, nextRoundAt: null, watchers: [] };
   if (!net) net = createNet(onNet, onNetStatus);
   $('#newBtn').textContent = 'Leave game';
 }
@@ -416,7 +416,7 @@ function exitOnline() {
   online = null; mode = 'quick'; cpu = null; aimLine.visible = false; tween = null; physicsOn = true;
   physics.removeStick(); resetBottles(); setStickHeld(); state = 'menu';
   $('#newBtn').textContent = 'New game'; $('#board').innerHTML = '';
-  $('#ticker').hidden = true; $('#hubBtn').hidden = true;
+  $('#ticker').hidden = true; $('#hubBtn').hidden = true; $('#watchers').hidden = true;
   ['#online', '#lobby', '#over', '#hub', '#mine'].forEach(s => $(s).hidden = true);
   setRoomParam(null);
 }
@@ -476,6 +476,7 @@ function onNet(m) {
       if (online.view === 'entry') online.view = 'lobby';
       return;
     case 'room': return onRoom(m);
+    case 'watchers': return setWatchers(m.match, m.names);
     case 'fixtures': // live scores during a league round
       online.fixtures = m.fixtures;
       renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
@@ -561,9 +562,28 @@ function onNetStatus(s) {
   }
 }
 
+// Who's watching our game: a note when someone starts, and a reminder under the scores while they're there
+function setWatchers(match, names, announce = true) {
+  if (match !== online.myMatch) return;
+  const arrived = names.filter(n => !online.watchers.includes(n));
+  online.watchers = names;
+  if (announce && arrived.length && online.view === 'game') {
+    const who = arrived.length > 1 ? `${arrived.slice(0, -1).join(', ')} and ${arrived.at(-1)} are` : `${arrived[0]} is`;
+    toast(`${who} watching your game`, 2200, true);
+  }
+  renderWatchers();
+}
+function renderWatchers() {
+  const el = $('#watchers'), names = online?.watchers || [];
+  el.hidden = !names.length || online.view !== 'game';
+  if (el.hidden) return;
+  el.textContent = names.length > 2 ? `${names.length} watching` : `${names.join(' and ')} watching`;
+  el.title = names.join(', ');
+}
+
 // Lobby
 function showLobby() {
-  online.view = 'lobby'; online.overQueued = false; state = 'menu';
+  online.view = 'lobby'; online.overQueued = false; state = 'menu'; renderWatchers();
   ['#over', '#online', '#setup', '#hub'].forEach(s => $(s).hidden = true);
   $('#hubBtn').hidden = true;
   renderLobby(); $('#lobby').hidden = false;
@@ -603,7 +623,7 @@ function renderLobby() {
 // League screen. As the main view (between our games), or peeked at over the game we're playing or watching.
 function showHub() {
   online.view = 'hub'; online.overQueued = false; state = 'menu'; cpu = null; aimLine.visible = false;
-  online.turnEndsAt = null;
+  online.turnEndsAt = null; renderWatchers();
   ['#over', '#online', '#setup', '#lobby'].forEach(s => $(s).hidden = true);
   refreshHub(); $('#hub').hidden = false;
 }
@@ -688,6 +708,7 @@ function snapPoses(poses) {
 function onlineSync(m) {
   ['#lobby', '#over', '#online', '#setup', '#league', '#hub'].forEach(s => $(s).hidden = true);
   online.view = m.match === online.myMatch ? 'game' : 'watch';
+  if (online.view === 'game') { online.watchers = []; setWatchers(m.match, m.watchers || [], false); } else renderWatchers();
   online.play = online.pending = null; online.overQueued = false; online.turnEndsAt = null;
   tween = null; cpu = null; aimLine.visible = false; landRing.visible = false; dragging = false;
   physics.removeStick();

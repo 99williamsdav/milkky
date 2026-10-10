@@ -85,11 +85,14 @@ export class Room {
     seat.ws = ws; seat.connected = true; this.emptySince = null;
     this.matches.forEach(m => m.seatChanged(seat));
   }
+  stopWatching(seat) {
+    this.matches.forEach(m => { if (m.spectators.delete(seat)) m.watchersChanged(); });
+  }
   // `left`: the player chose to go (or moved to another room), rather than losing the connection.
   disconnect(seat, { left = false } = {}) {
     seat.ws = null; seat.connected = false; seat.awaySince = Date.now();
     if (left) seat.left = true;
-    this.matches.forEach(m => m.spectators.delete(seat));
+    this.stopWatching(seat);
     if (this.inProgress) {
       // Keep the seat: they can rejoin, and the computer plays their turns meanwhile (or from now on, if they left).
       this.matches.forEach(m => m.seatChanged(seat));
@@ -231,12 +234,13 @@ export class Room {
         if (!isHost || this.phase !== 'between') return;
         return this.startRound();
       case 'watch': { // watch another fixture, or stop watching (match: null); your own: back into it
-        this.matches.forEach(x => x.spectators.delete(seat));
+        this.stopWatching(seat);
         const target = this.matches.find(x => x.id === m.match);
         if (!target) return;
         if (target.seats.includes(seat)) return target.catchUp(seat);
         target.spectators.add(seat);
-        return this.send(seat, target.syncState());
+        this.send(seat, target.syncState());
+        return target.watchersChanged();
       }
       case 'aim': return this.matchOf(seat)?.aim(seat, m);
       case 'throw': {
