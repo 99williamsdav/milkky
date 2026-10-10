@@ -925,10 +925,20 @@ const targetMesh = (() => {
   m.rotation.x = -Math.PI / 2; m.receiveShadow = true; m.visible = false; scene.add(m);
   return m;
 })();
-// 100 for a bullseye, 5 fewer for every 10 cm off, nothing beyond 2 m
-const trainPoints = d => Math.max(0, Math.round(100 - d * 50));
+// Out of 10: full marks in the centre ring (10 cm), falling away to nothing at the target's edge (50 cm)
+const TARGET_R = 0.5, BULL_R = 0.1;
+const trainPoints = d => Math.round(10 * THREE.MathUtils.clamp((TARGET_R - d) / (TARGET_R - BULL_R), 0, 1));
 const distText = d => d < 1 ? `${Math.round(d * 100)} cm` : `${d.toFixed(2)} m`;
 const trainTotal = () => training.throws.reduce((s, t) => s + t.pts, 0);
+// Aim (left/right) and length (long/short) marked separately out of 100: 1 m off scores nothing
+const partScore = errs => Math.round(errs.reduce((s, e) => s + Math.max(0, 100 - Math.abs(e) * 100), 0) / errs.length);
+const meanAbs = errs => errs.reduce((s, e) => s + Math.abs(e), 0) / errs.length;
+// Which way you tend to miss, if there's a clear pattern (more than 10 cm on average)
+function tendency(errs, plus, minus) {
+  const bias = errs.reduce((s, e) => s + e, 0) / errs.length;
+  return Math.abs(bias) < 0.1 ? 'no clear bias' : `tends ${bias > 0 ? plus : minus}`;
+}
+const missText = t => `${distText(Math.abs(t.side))} ${t.side >= 0 ? 'right' : 'left'}, ${distText(Math.abs(t.long))} ${t.long >= 0 ? 'long' : 'short'}`;
 
 // Park the bottles out of sight (behind you, still on the lawn), or bring them back
 function bottlesAway(away) {
@@ -966,7 +976,11 @@ function renderTraining() {
 function resolveTraining() {
   const t = physics.stick?.translation(), l = training.land || (t && { x: t.x, z: t.z }) || { x: 99, z: 99 };
   const d = Math.hypot(l.x - training.target.x, l.z - training.target.z), pts = trainPoints(d);
-  training.throws.push({ d, pts });
+  // Split the miss along the line from you to the target: how far long or short, and how far left or right
+  const fx = training.target.x - RELEASE.x, fz = training.target.z - RELEASE.z, fl = Math.hypot(fx, fz);
+  const ox = l.x - training.target.x, oz = l.z - training.target.z;
+  const long = (ox * fx + oz * fz) / fl, side = (ox * -fz + oz * fx) / fl; // + is long, + is right
+  training.throws.push({ d, pts, long, side });
   toast(`+${pts} · ${distText(d)} away`, 2200);
   renderTraining();
   state = 'scoring'; phaseT = 0;
@@ -981,9 +995,13 @@ function showTrainingResult() {
   $('#trRating').textContent = avg < 0.15 ? 'Sharpshooter! Barely a stick’s width off.' : avg < 0.35 ? 'A steady hand.'
     : avg < 0.7 ? 'Getting there.' : 'Keep practising: watch where the stick lands and adjust your flick.';
   const stat = (label, value) => `<div><span>${label}</span><b>${value}</b></div>`;
-  $('#trStats').innerHTML = stat('Points', `${total} / ${TRAIN_THROWS * 100}`) + stat('Average distance', distText(avg))
+  $('#trStats').innerHTML = stat('Points', `${total} / ${TRAIN_THROWS * 10}`) + stat('Average distance', distText(avg))
     + stat('Best throw', `${distText(best.d)} (+${best.pts})`) + stat('Personal best', `${Math.max(total, prev)} pts`);
-  $('#trThrows').innerHTML = ts.map((t, i) => `<div><span>${i + 1}</span><span>${distText(t.d)}</span><b>+${t.pts}</b></div>`).join('');
+  const sides = ts.map(t => t.side), longs = ts.map(t => t.long);
+  const part = (label, errs, plus, minus) => `<div><span>${label}</span><b>${partScore(errs)}<small> / 100</small></b>
+    <em>${distText(meanAbs(errs))} off on average, ${tendency(errs, plus, minus)}</em></div>`;
+  $('#trParts').innerHTML = part('Aim (left / right)', sides, 'right', 'left') + part('Length (long / short)', longs, 'long', 'short');
+  $('#trThrows').innerHTML = ts.map((t, i) => `<div><span>${i + 1}</span><span>${distText(t.d)}<em>${missText(t)}</em></span><b>+${t.pts}</b></div>`).join('');
   $('#trainOver').hidden = false;
 }
 function exitTraining() {

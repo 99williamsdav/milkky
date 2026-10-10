@@ -198,10 +198,13 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 .trstats div{background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column}
 .trstats span{font-size:12px;color:var(--muted)}
 .trstats b{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
-.trthrows{display:grid;grid-template-columns:1fr 1fr;column-gap:16px;margin:0 0 16px;font-size:14px;font-variant-numeric:tabular-nums}
+.trthrows{display:grid;grid-template-columns:1fr;margin:0 0 16px;font-size:14px;font-variant-numeric:tabular-nums}
 .trthrows div{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--line)}
 .trthrows span:first-child{color:var(--muted);width:1.4em}
 .trthrows b{margin-left:auto}
+.trthrows em{font-style:normal;font-size:12px;color:var(--muted);margin-left:8px}
+.trstats b small{font-size:12px;font-weight:600;color:var(--muted)}
+.trparts em{font-style:normal;font-size:12px;color:var(--muted);margin-top:2px}
 #lgLength{margin-bottom:6px}
 #lgLength button{display:flex;flex-direction:column;align-items:center;line-height:1.1}
 #lgLength small{font-size:12px;font-weight:600;opacity:.8}
@@ -307,6 +310,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <h2 id="trTitle">Training complete</h2>
       <p class="sub" id="trRating"></p>
       <div class="trstats" id="trStats"></div>
+      <div class="trstats trparts" id="trParts"></div>
       <div class="sectionlabel">Your throws</div>
       <div class="trthrows" id="trThrows"></div>
       <div class="row"><button class="primary" id="trAgain">Go again</button><button id="trMenu">Menu</button></div>
