@@ -422,7 +422,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
     </div>
   </div>
 </div>
-<script type="importmap">
+<script>Object.defineProperty(document,"hidden",{get:()=>false});(function(){const ch=new MessageChannel();let q=[];ch.port1.onmessage=()=>{const f=q;q=[];const t=performance.now();f.forEach(cb=>cb(t))};window.requestAnimationFrame=cb=>{q.push(cb);setTimeout(()=>ch.port2.postMessage(0),16);return 1}})()</script><script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"

@@ -61,7 +61,7 @@ function setStickHeld(pull = 0, aim = 0) {
 function resetBottles() {
   landRing.visible = false; clearMilk(bottles);
   physics.resetBottles();
-  for (const p of bottles) p.label.material.color.set(0xffffff);
+  for (const p of bottles) { p.label.material.color.set(0xffffff); p.mesh.visible = p.label.visible = true; } // (training hides them)
 }
 
 function startGame(types) {
@@ -908,6 +908,94 @@ $('#mineCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(personalLink()); toast('Personal link copied', 1500); } catch (e) { toast(personalLink(), 5000); }
 };
 
+// ---------- Training ----------
+// Target practice: the bottles are cleared away and a target appears somewhere on the lawn. Ten throws, each
+// scored on how close the stick first lands to the middle of it.
+const TRAIN_THROWS = 10, TRAIN_BEST_KEY = 'milkky-training-best';
+let training = null; // { throws: [{ d, pts }], target: where it is, land: where the stick first touched down }
+const targetMesh = (() => {
+  // Red and white rings, 10 cm apart, 1 m across
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  [[128, '#c0392b'], [102, '#fbf6ea'], [77, '#c0392b'], [51, '#fbf6ea'], [26, '#c0392b']].forEach(([r, col]) => {
+    g.fillStyle = col; g.beginPath(); g.arc(128, 128, r, 0, Math.PI * 2); g.fill();
+  });
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.CircleGeometry(0.5, 48), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, transparent: true }));
+  m.rotation.x = -Math.PI / 2; m.receiveShadow = true; m.visible = false; scene.add(m);
+  return m;
+})();
+// 100 for a bullseye, 5 fewer for every 10 cm off, nothing beyond 2 m
+const trainPoints = d => Math.max(0, Math.round(100 - d * 50));
+const distText = d => d < 1 ? `${Math.round(d * 100)} cm` : `${d.toFixed(2)} m`;
+const trainTotal = () => training.throws.reduce((s, t) => s + t.pts, 0);
+
+// Park the bottles out of sight (behind you, still on the lawn), or bring them back
+function bottlesAway(away) {
+  if (!away) return resetBottles();
+  bottles.forEach((p, i) => {
+    physics.placeUpright(p.body, 20 + (i % 4) * 0.3, 24 + Math.floor(i / 4) * 0.3);
+    p.mesh.visible = p.label.visible = false;
+  });
+}
+function startTraining() {
+  mode = 'training'; leagueMatch = null; cpu = null; tween = null; physicsOn = true;
+  ['#setup', '#over', '#league', '#trainOver'].forEach(s => $(s).hidden = true);
+  physics.removeStick(); clearMilk(bottles); bottlesAway(true);
+  training = { throws: [], target: V(0, 0, 0), land: null };
+  nextTarget();
+}
+function nextTarget() {
+  if (training.throws.length >= TRAIN_THROWS) return showTrainingResult();
+  // Anywhere you can reach: 2 to 7.5 m out, within the aiming range
+  const a = (Math.random() - 0.5) * 0.8, d = 2 + Math.random() * 5.5;
+  training.target.set(RELEASE.x + Math.sin(a) * d, 0, RELEASE.z - Math.cos(a) * d);
+  targetMesh.position.set(training.target.x, 0.002, training.target.z); targetMesh.visible = true;
+  training.land = null; landRing.visible = false;
+  physics.removeStick(); setStickHeld();
+  viewBottles = false; $('#viewBtn').textContent = 'Look at target';
+  state = 'aim'; renderTraining();
+  throwTip();
+}
+function renderTraining() {
+  const n = training.throws.length;
+  $('#board').innerHTML = `<div class="chip active"><div class="nm">Training</div><div class="sc">${trainTotal()}<small> pts</small></div>
+    <div class="tsub">Throw ${Math.min(n + 1, TRAIN_THROWS)} of ${TRAIN_THROWS}</div></div>`;
+}
+// The stick has come to rest: score where it first landed
+function resolveTraining() {
+  const t = physics.stick?.translation(), l = training.land || (t && { x: t.x, z: t.z }) || { x: 99, z: 99 };
+  const d = Math.hypot(l.x - training.target.x, l.z - training.target.z), pts = trainPoints(d);
+  training.throws.push({ d, pts });
+  toast(`+${pts} · ${distText(d)} away`, 2200);
+  renderTraining();
+  state = 'scoring'; phaseT = 0;
+}
+function showTrainingResult() {
+  state = 'over';
+  const ts = training.throws, total = trainTotal(), avg = ts.reduce((s, t) => s + t.d, 0) / ts.length;
+  const best = ts.reduce((b, t) => (t.d < b.d ? t : b));
+  let prev = 0;
+  try { prev = +localStorage.getItem(TRAIN_BEST_KEY) || 0; if (total > prev) localStorage.setItem(TRAIN_BEST_KEY, total); } catch (e) {}
+  $('#trTitle').textContent = total > prev && prev ? 'New personal best!' : 'Training complete';
+  $('#trRating').textContent = avg < 0.15 ? 'Sharpshooter! Barely a stick’s width off.' : avg < 0.35 ? 'A steady hand.'
+    : avg < 0.7 ? 'Getting there.' : 'Keep practising: watch where the stick lands and adjust your flick.';
+  const stat = (label, value) => `<div><span>${label}</span><b>${value}</b></div>`;
+  $('#trStats').innerHTML = stat('Points', `${total} / ${TRAIN_THROWS * 100}`) + stat('Average distance', distText(avg))
+    + stat('Best throw', `${distText(best.d)} (+${best.pts})`) + stat('Personal best', `${Math.max(total, prev)} pts`);
+  $('#trThrows').innerHTML = ts.map((t, i) => `<div><span>${i + 1}</span><span>${distText(t.d)}</span><b>+${t.pts}</b></div>`).join('');
+  $('#trainOver').hidden = false;
+}
+function exitTraining() {
+  training = null; targetMesh.visible = false; landRing.visible = false;
+  physics.removeStick(); bottlesAway(false); setStickHeld();
+  $('#board').innerHTML = ''; $('#viewBtn').textContent = 'Look at bottles'; $('#trainOver').hidden = true;
+  mode = 'quick'; state = 'menu';
+}
+$('#trainBtn').onclick = startTraining;
+$('#trAgain').onclick = startTraining;
+$('#trMenu').onclick = () => { exitTraining(); $('#setup').hidden = false; };
+
 // ---------- Camera ----------
 const THROW_POS = V(0, 1.1, 0.9), THROW_LOOK = V(0, 0.05, -3.0);
 const camPos = THROW_POS.clone(), camLook = THROW_LOOK.clone();
@@ -923,7 +1011,7 @@ function updateCamera(dt) {
   const throwView = ['aim', 'cpu', 'menu', 'remote', 'sent'].includes(state) || (state === 'flying' && flyTime < 0.3);
   const follow = viewBottles || !throwView;
   let tp, tl;
-  if (follow) { const c = bottleCentre(); tp = c.clone().add(V(0, 0.8, 1.4)); tl = c.clone().add(V(0, 0.02, -0.1)); }
+  if (follow) { const c = training ? training.target.clone() : bottleCentre(); tp = c.clone().add(V(0, 0.8, 1.4)); tl = c.clone().add(V(0, 0.02, -0.1)); }
   else { tp = THROW_POS; tl = THROW_LOOK; }
   const k = 1 - Math.exp(-dt * (state === 'flying' ? 1.6 : 3));
   camPos.lerp(tp, k); camLook.lerp(tl, k);
@@ -952,10 +1040,10 @@ function frame(now) {
       if (flyTime >= playLength(online.play)) resolveOnlineThrow();
     } else {
       calm = physics.isMoving() ? 0 : calm + dt;
-      if ((calm > 0.6 && flyTime > 0.8) || flyTime > 12) resolveThrow();
+      if ((calm > 0.6 && flyTime > 0.8) || flyTime > 12) (training ? resolveTraining : resolveThrow)();
     }
   } else if (state === 'scoring') {
-    phaseT += dt; if (phaseT > 1.3) startRestand();
+    phaseT += dt; if (phaseT > (training ? 1.8 : 1.3)) (training ? nextTarget : startRestand)();
   } else if (state === 'restand' && tween) {
     tween.t += dt;
     const k = Math.min(1, tween.t / tween.dur), e = k * k * (3 - 2 * k);
@@ -978,6 +1066,7 @@ function frame(now) {
     const t = stick.translation(), r = stick.rotation();
     if (!landed && state === 'flying' && flyTime > 0.1 && t.y < STICK_HALF + 0.01) {
       landed = true; landRing.position.set(t.x, 0.003, t.z); landRing.visible = true;
+      if (training) training.land = { x: t.x, z: t.z };
     }
     stickMesh.position.set(t.x, t.y, t.z); stickMesh.quaternion.set(r.x, r.y, r.z, r.w);
   }
@@ -1066,6 +1155,7 @@ $('#overNew').onclick = () => {
   $('#over').hidden = true; $('#setup').hidden = false; state = 'menu';
 };
 $('#newBtn').onclick = () => {
+  if (training) exitTraining();
   if (mode === 'online' && isAsync()) return stepAway(); // your seat is kept; carry on later from My games
   if (mode === 'online') { if (confirm('Leave this online game?')) leaveOnline(); return; }
   mode = 'quick'; leagueMatch = null; cpu = null; aimLine.visible = false; physics.removeStick(); resetBottles(); physicsOn = true; tween = null; state = 'menu'; $('#setup').hidden = false;
@@ -1075,7 +1165,7 @@ $('#setupRules').onclick = () => $('#rules').hidden = false;
 $('#rulesClose').onclick = () => $('#rules').hidden = true;
 $('#viewBtn').onclick = () => {
   viewBottles = !viewBottles;
-  $('#viewBtn').textContent = viewBottles ? 'Back to throw view' : 'Look at bottles';
+  $('#viewBtn').textContent = viewBottles ? 'Back to throw view' : training ? 'Look at target' : 'Look at bottles';
 };
 
 setStickHeld();
