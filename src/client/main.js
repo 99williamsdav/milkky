@@ -425,11 +425,12 @@ function setRoomParam(code) {
   if (code) u.searchParams.set('room', code); else u.searchParams.delete('room');
   history.replaceState(null, '', u);
 }
-// Invites go through /join or, for a league or career, /joinleague (join.html / joinleague.html, mapped in nginx).
+// Invites go through /join, /joinleague or /joincareer (join.html and so on, mapped in nginx).
 // Each has its own link preview, then forwards to the game.
 function shareLink(code) {
   const here = new URL(location.href), server = here.searchParams.get('server');
-  const u = new URL(isMulti(online?.room) ? 'joinleague' : 'join', here);
+  const mode = online?.room?.mode;
+  const u = new URL(mode === 'career' ? 'joincareer' : mode === 'league' ? 'joinleague' : 'join', here);
   u.searchParams.set('room', code);
   if (server) u.searchParams.set('server', server);
   return u.href;
