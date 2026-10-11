@@ -969,10 +969,21 @@ $('#mineCopy').onclick = async () => {
 };
 
 // ---------- Training ----------
-// Target practice: the bottles are cleared away and a target appears somewhere on the lawn. Ten throws, each
-// scored on how close the stick first lands to the middle of it.
-const TRAIN_THROWS = 10, TRAIN_BEST_KEY = 'milkky-training-best';
-let training = null; // { throws: [{ d, pts, long, side }], target: where it is, land: where the stick first touched down }
+// Ten throws of practice, chosen from the Training menu:
+//   target: the bottles are cleared away and a target appears on the lawn; scored on how close the stick lands
+//   lateral: one bottle as far away as the back row, moved left and right; scored on left/right only
+//   length: one bottle straight ahead, moved nearer and further; scored on long/short only
+//   strike: the full starting rack every throw; scored on how many bottles go over
+const TRAIN_THROWS = 10;
+const TRAINING = {
+  target: { name: 'Target Practice', view: 'Look at target', best: 'milkky-training-best' },
+  lateral: { name: 'Lateral Training', view: 'Look at bottle', best: 'milkky-training-best-lateral' },
+  length: { name: 'Length Training', view: 'Look at bottle', best: 'milkky-training-best-length' },
+  strike: { name: 'Strike Training', view: 'Look at bottles', best: 'milkky-training-best-strike' },
+};
+// training: { kind, throws: [...], target: where to aim, land: where the stick first touched down, bottle (lateral/length) }
+// Each throw: { pts, d } plus { long, side } (target), { err, hit } (lateral/length), or { fallen } (strike)
+let training = null;
 const targetMesh = (() => {
   // Red and white rings, 10 cm apart, 1 m across
   const c = document.createElement('canvas'); c.width = c.height = 256;
@@ -985,11 +996,12 @@ const targetMesh = (() => {
   m.rotation.x = -Math.PI / 2; m.receiveShadow = true; m.visible = false; scene.add(m);
   return m;
 })();
-// Out of 10: full marks in the centre ring (10 cm), falling away to nothing at the target's edge (50 cm)
+// Out of 10: full marks within 10 cm, falling away to nothing at 50 cm (the target's edge)
 const TARGET_R = 0.5, BULL_R = 0.1;
 const trainPoints = d => Math.round(10 * THREE.MathUtils.clamp((TARGET_R - d) / (TARGET_R - BULL_R), 0, 1));
 const distText = d => d < 1 ? `${Math.round(d * 100)} cm` : `${d.toFixed(2)} m`;
 const trainTotal = () => training.throws.reduce((s, t) => s + t.pts, 0);
+const trainMax = kind => TRAIN_THROWS * (kind === 'strike' ? 12 : 10);
 // Aim (left/right) and length (long/short) marked separately, each throw out of 10 like the points
 const partScore = errs => errs.reduce((s, e) => s + trainPoints(Math.abs(e)), 0);
 const meanAbs = errs => errs.reduce((s, e) => s + Math.abs(e), 0) / errs.length;
@@ -998,7 +1010,21 @@ function tendency(errs, plus, minus) {
   const bias = errs.reduce((s, e) => s + e, 0) / errs.length;
   return Math.abs(bias) < 0.1 ? 'no clear bias' : `tends ${bias > 0 ? plus : minus}`;
 }
-const missText = t => `${distText(Math.abs(t.side))} ${t.side >= 0 ? 'right' : 'left'}, ${distText(Math.abs(t.long))} ${t.long >= 0 ? 'long' : 'short'}`;
+const sideText = e => `${distText(Math.abs(e))} ${e >= 0 ? 'right' : 'left'}`;
+const longText = e => `${distText(Math.abs(e))} ${e >= 0 ? 'long' : 'short'}`;
+// Mostly near the middle of [lo, hi], now and then out towards the edges
+const middling = (lo, hi) => lo + (hi - lo) * (Math.random() + Math.random() + Math.random()) / 3;
+// The back row's distance, and the bottle used for lateral and length training (the middle of the back row)
+const BACK_DIST = RELEASE.z - (FRONT_Z - 3 * ROW);
+const trainBottle = () => bottles.find(p => p.num === 9);
+// How a throw missed the spot aimed at, seen from where you throw: how much further (+) or shorter it went,
+// and how far right (+) or left its direction was, measured at the spot's distance (so a short throw in the
+// wrong direction still shows how far off the aim was)
+function missFrom(spot, l) {
+  const polar = p => ({ a: Math.atan2(p.x - RELEASE.x, RELEASE.z - p.z), d: Math.hypot(p.x - RELEASE.x, p.z - RELEASE.z) });
+  const s = polar(spot), t = polar(l);
+  return { long: t.d - s.d, side: (t.a - s.a) * s.d };
+}
 
 // Park the bottles out of sight (behind you, still on the lawn), or bring them back
 function bottlesAway(away) {
@@ -1008,71 +1034,132 @@ function bottlesAway(away) {
     p.mesh.visible = p.label.visible = false;
   });
 }
-function startTraining() {
+function openTrainingMenu() {
+  ['#setup', '#trainOver'].forEach(s => $(s).hidden = true);
+  for (const [kind, t] of Object.entries(TRAINING)) {
+    let best = 0;
+    try { best = +localStorage.getItem(t.best) || 0; } catch (e) {}
+    $(`#trBest-${kind}`).textContent = best ? `Best ${best} / ${trainMax(kind)}` : '';
+  }
+  $('#trainMenu').hidden = false;
+}
+function startTraining(kind) {
   mode = 'training'; leagueMatch = null; cpu = null; tween = null; physicsOn = true;
-  ['#setup', '#over', '#league', '#trainOver'].forEach(s => $(s).hidden = true);
+  ['#setup', '#over', '#league', '#trainOver', '#trainMenu'].forEach(s => $(s).hidden = true);
   physics.removeStick(); clearMilk(bottles); bottlesAway(true);
-  training = { throws: [], target: V(0, 0, 0), land: null };
+  training = { kind, throws: [], target: V(0, 0, 0), land: null };
   nextTarget();
 }
 function nextTarget() {
   if (training.throws.length >= TRAIN_THROWS) return showTrainingResult();
-  // Anywhere you can reach: 2 to 7.5 m out, within the aiming range
-  const a = (Math.random() - 0.5) * 0.8, d = 2 + Math.random() * 5.5;
-  training.target.set(RELEASE.x + Math.sin(a) * d, 0, RELEASE.z - Math.cos(a) * d);
-  targetMesh.position.set(training.target.x, 0.002, training.target.z); targetMesh.visible = true;
+  const kind = training.kind, tg = training.target;
+  physics.removeStick(); clearMilk(bottles);
+  targetMesh.visible = false;
+  if (kind === 'target') {
+    // Anywhere you can reach, but mostly around the middle: 2.5 to 6.5 m out, up to 0.35 rad either side
+    const a = middling(-0.35, 0.35), d = middling(2.5, 6.5);
+    tg.set(RELEASE.x + Math.sin(a) * d, 0, RELEASE.z - Math.cos(a) * d);
+    targetMesh.position.set(tg.x, 0.002, tg.z); targetMesh.visible = true;
+  } else if (kind === 'strike') {
+    resetBottles();
+  } else {
+    // One bottle: as far as the back row but moved sideways, or straight ahead at a new distance
+    tg.set(kind === 'lateral' ? middling(-1.5, 1.5) : 0, 0, kind === 'lateral' ? FRONT_Z - 3 * ROW : RELEASE.z - middling(2, 7));
+    const p = trainBottle();
+    physics.placeUpright(p.body, tg.x, tg.z);
+    p.mesh.visible = p.label.visible = true; p.label.material.color.set(0xffffff);
+  }
   training.land = null; landRing.visible = false;
-  physics.removeStick(); setStickHeld();
-  viewBottles = false; $('#viewBtn').textContent = 'Look at target';
+  setStickHeld();
+  viewBottles = false; $('#viewBtn').textContent = TRAINING[kind].view;
   state = 'aim'; renderTraining();
   throwTip();
 }
 function renderTraining() {
-  const n = training.throws.length;
-  $('#board').innerHTML = `<div class="chip active"><div class="nm">Training</div><div class="sc">${trainTotal()}<small> pts</small></div>
+  const n = training.throws.length, kind = training.kind;
+  $('#board').innerHTML = `<div class="chip active"><div class="nm">${TRAINING[kind].name}</div>
+    <div class="sc">${trainTotal()}<small> ${kind !== 'strike' ? 'pts' : trainTotal() === 1 ? 'bottle' : 'bottles'}</small></div>
     <div class="tsub">Throw ${Math.min(n + 1, TRAIN_THROWS)} of ${TRAIN_THROWS}</div></div>`;
 }
-// The stick has come to rest: score where it first landed
+// The stick has come to rest: score the throw
 function resolveTraining() {
+  const kind = training.kind;
   const t = physics.stick?.translation(), l = training.land || (t && { x: t.x, z: t.z }) || { x: 99, z: 99 };
-  const d = Math.hypot(l.x - training.target.x, l.z - training.target.z), pts = trainPoints(d);
-  // Split the miss along the line from you to the target: how far long or short, and how far left or right
-  const fx = training.target.x - RELEASE.x, fz = training.target.z - RELEASE.z, fl = Math.hypot(fx, fz);
-  const ox = l.x - training.target.x, oz = l.z - training.target.z;
-  const long = (ox * fx + oz * fz) / fl, side = (ox * -fz + oz * fx) / fl; // + is long, + is right
-  training.throws.push({ d, pts, long, side });
-  toast(`+${pts} · ${distText(d)} away`, 2200);
+  let throwRec, msg;
+  if (kind === 'strike') {
+    const fallen = physics.fallenBottles();
+    fallen.forEach(b => bottles.find(p => p.num === b.num)?.label.material.color.set(0xff6b5b));
+    throwRec = { pts: fallen.length, fallen: fallen.length };
+    msg = fallen.length === 12 ? 'Strike! All 12' : `${fallen.length} bottle${fallen.length === 1 ? '' : 's'}`;
+  } else if (kind === 'target') {
+    const d = Math.hypot(l.x - training.target.x, l.z - training.target.z);
+    throwRec = { d, pts: trainPoints(d), ...missFrom(training.target, l) };
+    msg = `+${throwRec.pts} · ${distText(d)} away`;
+  } else {
+    // Only one direction counts. Hitting the bottle counts as spot on.
+    const hit = !!physics.firstHit, m = missFrom(training.target, l);
+    const err = hit ? 0 : kind === 'lateral' ? m.side : m.long;
+    throwRec = { err, hit, d: Math.abs(err), pts: trainPoints(Math.abs(err)) };
+    msg = `+${throwRec.pts} · ${hit ? 'Hit!' : kind === 'lateral' ? sideText(err) : longText(err)}`;
+  }
+  training.throws.push(throwRec);
+  toast(msg, 2200);
   renderTraining();
   state = 'scoring'; phaseT = 0;
 }
 function showTrainingResult() {
   state = 'over';
-  const ts = training.throws, total = trainTotal(), avg = ts.reduce((s, t) => s + t.d, 0) / ts.length;
-  const best = ts.reduce((b, t) => (t.d < b.d ? t : b));
+  const kind = training.kind, ts = training.throws, total = trainTotal(), max = trainMax(kind);
   let prev = 0;
-  try { prev = +localStorage.getItem(TRAIN_BEST_KEY) || 0; if (total > prev) localStorage.setItem(TRAIN_BEST_KEY, total); } catch (e) {}
-  $('#trTitle').textContent = total > prev && prev ? 'New personal best!' : 'Training complete';
-  $('#trRating').textContent = avg < 0.15 ? 'Sharpshooter! Barely a stick’s width off.' : avg < 0.35 ? 'A steady hand.'
-    : avg < 0.7 ? 'Getting there.' : 'Keep practising: watch where the stick lands and adjust your flick.';
+  try { prev = +localStorage.getItem(TRAINING[kind].best) || 0; if (total > prev) localStorage.setItem(TRAINING[kind].best, total); } catch (e) {}
+  $('#trTitle').textContent = total > prev && prev ? 'New personal best!' : `${TRAINING[kind].name} complete`;
   const stat = (label, value) => `<div><span>${label}</span><b>${value}</b></div>`;
-  $('#trStats').innerHTML = stat('Points', `${total} / ${TRAIN_THROWS * 10}`) + stat('Average distance', distText(avg))
-    + stat('Best throw', `${distText(best.d)} (+${best.pts})`) + stat('Personal best', `${Math.max(total, prev)} pts`);
-  const sides = ts.map(t => t.side), longs = ts.map(t => t.long);
   const part = (label, errs, plus, minus) => `<div><span>${label}</span><b>${partScore(errs)}<small> / ${TRAIN_THROWS * 10}</small></b>
     <em>${distText(meanAbs(errs))} off on average, ${tendency(errs, plus, minus)}</em></div>`;
-  $('#trParts').innerHTML = part('Aim (left / right)', sides, 'right', 'left') + part('Length (long / short)', longs, 'long', 'short');
-  $('#trThrows').innerHTML = ts.map((t, i) => `<div><span>${i + 1}</span><span>${distText(t.d)}<em>${missText(t)}</em></span><b>+${t.pts}</b></div>`).join('');
+  const row = (i, what, detail, pts) => `<div><span>${i + 1}</span><span>${what}${detail ? `<em>${detail}</em>` : ''}</span><b>+${pts}</b></div>`;
+  let rating, stats, parts = '', rows;
+  if (kind === 'strike') {
+    const avg = total / ts.length, best = Math.max(...ts.map(t => t.fallen));
+    rating = avg >= 9 ? 'Demolition expert!' : avg >= 6 ? 'Solid hitting.' : avg >= 3 ? 'Getting there.'
+      : 'Keep practising: aim for the middle of the front of the rack.';
+    stats = stat('Bottles', `${total} / ${max}`) + stat('Average per throw', avg.toFixed(1))
+      + stat('Best throw', `${best} bottle${best === 1 ? '' : 's'}`) + stat('Personal best', `${Math.max(total, prev)} / ${max}`);
+    rows = ts.map((t, i) => row(i, `${t.fallen} bottle${t.fallen === 1 ? '' : 's'}`, t.fallen === 12 ? 'strike' : '', t.pts));
+  } else {
+    const avg = ts.reduce((s, t) => s + t.d, 0) / ts.length, best = ts.reduce((b, t) => (t.d < b.d ? t : b));
+    rating = avg < 0.15 ? 'Sharpshooter! Barely a stick’s width off.' : avg < 0.35 ? 'A steady hand.'
+      : avg < 0.7 ? 'Getting there.' : 'Keep practising: watch where the stick lands and adjust your flick.';
+    const avgLabel = { target: 'Average distance', lateral: 'Average left / right miss', length: 'Average long / short miss' }[kind];
+    stats = stat('Points', `${total} / ${max}`) + stat(avgLabel, distText(avg))
+      + stat('Best throw', best.hit ? 'Hit (+10)' : `${distText(best.d)} (+${best.pts})`) + stat('Personal best', `${Math.max(total, prev)} / ${max}`);
+    if (kind === 'target') {
+      parts = part('Aim (left / right)', ts.map(t => t.side), 'right', 'left') + part('Length (long / short)', ts.map(t => t.long), 'long', 'short');
+      rows = ts.map((t, i) => row(i, distText(t.d), `${sideText(t.side)}, ${longText(t.long)}`, t.pts));
+    } else {
+      const errs = ts.filter(t => !t.hit).map(t => t.err), hits = ts.filter(t => t.hit).length;
+      const [plus, minus] = kind === 'lateral' ? ['right', 'left'] : ['long', 'short'];
+      parts = `<div><span>Hits</span><b>${hits}<small> / ${TRAIN_THROWS}</small></b></div>`
+        + `<div><span>Misses</span><b>${errs.length}</b><em>${errs.length ? tendency(errs, plus, minus) : 'none at all!'}</em></div>`;
+      rows = ts.map((t, i) => row(i, t.hit ? 'Hit' : kind === 'lateral' ? sideText(t.err) : longText(t.err), '', t.pts));
+    }
+  }
+  $('#trRating').textContent = rating;
+  $('#trStats').innerHTML = stats;
+  $('#trParts').innerHTML = parts; $('#trParts').hidden = !parts;
+  $('#trThrows').innerHTML = rows.join('');
   $('#trainOver').hidden = false;
 }
 function exitTraining() {
   training = null; targetMesh.visible = false; landRing.visible = false;
-  physics.removeStick(); bottlesAway(false); setStickHeld();
+  physics.removeStick(); clearMilk(bottles); bottlesAway(false); setStickHeld();
   $('#board').innerHTML = ''; $('#viewBtn').textContent = 'Look at bottles'; $('#trainOver').hidden = true;
   mode = 'quick'; state = 'menu';
 }
-$('#trainBtn').onclick = startTraining;
-$('#trAgain').onclick = startTraining;
-$('#trMenu').onclick = () => { exitTraining(); $('#setup').hidden = false; };
+$('#trainBtn').onclick = openTrainingMenu;
+for (const kind of Object.keys(TRAINING)) $(`#tr-${kind}`).onclick = () => startTraining(kind);
+$('#trainBack').onclick = () => { $('#trainMenu').hidden = true; $('#setup').hidden = false; };
+$('#trAgain').onclick = () => startTraining(training.kind);
+$('#trMenu').onclick = () => { exitTraining(); openTrainingMenu(); };
 
 // ---------- Camera ----------
 const THROW_POS = V(0, 1.1, 0.9), THROW_LOOK = V(0, 0.05, -3.0);
@@ -1089,7 +1176,7 @@ function updateCamera(dt) {
   const throwView = ['aim', 'cpu', 'menu', 'remote', 'sent'].includes(state) || (state === 'flying' && flyTime < 0.3);
   const follow = viewBottles || !throwView;
   let tp, tl;
-  if (follow) { const c = training ? training.target.clone() : bottleCentre(); tp = c.clone().add(V(0, 0.8, 1.4)); tl = c.clone().add(V(0, 0.02, -0.1)); }
+  if (follow) { const c = training && training.kind !== 'strike' ? training.target.clone() : bottleCentre(); tp = c.clone().add(V(0, 0.8, 1.4)); tl = c.clone().add(V(0, 0.02, -0.1)); }
   else { tp = THROW_POS; tl = THROW_LOOK; }
   const k = 1 - Math.exp(-dt * (state === 'flying' ? 1.6 : 3));
   camPos.lerp(tp, k); camLook.lerp(tl, k);
@@ -1243,7 +1330,7 @@ $('#setupRules').onclick = () => $('#rules').hidden = false;
 $('#rulesClose').onclick = () => $('#rules').hidden = true;
 $('#viewBtn').onclick = () => {
   viewBottles = !viewBottles;
-  $('#viewBtn').textContent = viewBottles ? 'Back to throw view' : training ? 'Look at target' : 'Look at bottles';
+  $('#viewBtn').textContent = viewBottles ? 'Back to throw view' : training ? TRAINING[training.kind].view : 'Look at bottles';
 };
 
 setStickHeld();
