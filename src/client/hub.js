@@ -1,7 +1,9 @@
 // The online league screen (live games, this round's results, the table) and the live-scores strip.
 // Pure rendering from the room state the server sends; main.js decides when to show it.
+// (A career uses the same screen, filled by careerhub.js.)
 import { showMilkKing } from './milkking.js';
 import { faceSVG } from './faces.js';
+import { stepName } from '../shared/career.js';
 
 const $ = s => document.querySelector(s);
 export const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -14,12 +16,12 @@ export const myFixture = (fixtures, you) => (fixtures || []).find(f => f.seats.i
 // `watching`: it's someone else's game.
 export function renderTicker(room, fixtures, showing, watching = false) {
   const el = $('#ticker');
-  const live = room?.mode === 'league' && room.phase === 'playing';
+  const live = (room?.mode === 'league' || room?.mode === 'career') && room.phase === 'playing';
   const others = live ? (fixtures || []).filter(f => f.id !== showing) : [];
   el.hidden = !live || (!others.length && !watching);
   if (el.hidden) return;
-  const lg = room.league;
-  el.innerHTML = `<span class="lbl">${watching ? 'Watching · ' : ''}Round ${lg.round} of ${lg.rounds}</span>` + others.map(f =>
+  const round = room.mode === 'career' ? stepName(room.career.state) : `Round ${room.league.round} of ${room.league.rounds}`;
+  el.innerHTML = `<span class="lbl">${watching ? 'Watching · ' : ''}${round}</span>` + others.map(f =>
     `<span>${esc(f.players[0].name)} <b>${score(f)}</b> ${esc(f.players[1].name)}${f.over ? ' <span class="lbl">final</span>' : ''}</span>`).join('');
 }
 
@@ -31,6 +33,9 @@ export function renderHub({ room, fixtures, you, view, watching, secsToNext, rou
   const slow = room.pace === 'async';
   const lg = room.league;
   if (!lg) return;
+  // Sections only a career has
+  ['#hcMovesWrap', '#hcTiers', '#hcResultsWrap', '#hcCupWrap', '#hcWaitWrap'].forEach(s => $(s).hidden = true);
+  $('#hcKey').innerHTML = ''; $('#hubTableLabel').textContent = 'Table';
   const host = room.you === room.host;
   const mine = myFixture(fixtures, you);
   const live = (fixtures || []).filter(f => !f.over), done = (fixtures || []).filter(f => f.over);

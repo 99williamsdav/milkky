@@ -102,6 +102,13 @@ export function zone(c, tier, pos) {
   if (tier < BOTTOM && pos >= c.leagues[tier].entries.length - DOWN) return 'down';
   return '';
 }
+// A step's name: 'Round 3 of 7' or 'Cup · Quarter-finals' (i: its place in the calendar; the current step by default)
+export function stepName(c, i = c.step) {
+  if (i >= STEPS.length) return `Season ${c.season} complete`;
+  const before = STEPS.slice(0, i);
+  return STEPS[i] === 'L' ? `Round ${before.filter(s => s === 'L').length + 1} of ${LEAGUE_ROUNDS}`
+    : `Cup · ${CUP_ROUNDS[before.filter(s => s === 'C').length]}`;
+}
 export const leagueDone = c => c.round >= LEAGUE_ROUNDS;
 export const leagueRounds = () => LEAGUE_ROUNDS;
 // How someone's cup is going: { won } | { out: { round, by } } | { bye } (waiting for round 2) | { through: round next }

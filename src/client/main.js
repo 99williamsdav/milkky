@@ -16,6 +16,7 @@ import * as Achv from './achievements.js';
 import { botById } from '../shared/roster.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
+import { renderCareerHub, careerAchievements as careerAchievementsOnline } from './careerhub.js';
 
 const $ = s => document.querySelector(s);
 let RAPIER;
@@ -385,6 +386,8 @@ const ANIMATING = ['flying', 'scoring', 'restand'];
 const STICK_BODY = 12; // body index the server uses for the stick
 const NAME_KEY = 'milkky-name';
 const GAME_MESSAGES = new Set(['start', 'sync', 'turn', 'throw', 'aim', 'status']);
+// A league or a career: rounds of games played at the same time, with the league screen between them
+const isMulti = r => r?.mode === 'league' || r?.mode === 'career';
 
 function enterOnline() {
   mode = 'online'; leagueMatch = null; cpu = null; aimLine.visible = false; tween = null;
@@ -421,11 +424,11 @@ function setRoomParam(code) {
   if (code) u.searchParams.set('room', code); else u.searchParams.delete('room');
   history.replaceState(null, '', u);
 }
-// Invites go through /join or, for a league, /joinleague (join.html / joinleague.html, mapped in nginx).
+// Invites go through /join or, for a league or career, /joinleague (join.html / joinleague.html, mapped in nginx).
 // Each has its own link preview, then forwards to the game.
 function shareLink(code) {
   const here = new URL(location.href), server = here.searchParams.get('server');
-  const u = new URL(online?.room?.mode === 'league' ? 'joinleague' : 'join', here);
+  const u = new URL(isMulti(online?.room) ? 'joinleague' : 'join', here);
   u.searchParams.set('room', code);
   if (server) u.searchParams.set('server', server);
   return u.href;
@@ -524,17 +527,21 @@ function onRoom(m) {
   // Long Haul: a take-your-time league we were in has finished
   if (m.mode === 'league' && m.pace === 'async' && m.phase === 'over' && m.league?.table.some(e => e.seat === m.you)) Achv.unlock('longHaul');
   if (m.fixtures) online.fixtures = m.fixtures;
-  if (m.league?.nextRoundIn != null) online.nextRoundAt = performance.now() + m.league.nextRoundIn;
-  online.roundEndsAt = m.league?.roundEndsIn != null ? performance.now() + m.league.roundEndsIn : null;
-  $('#hubBtn').hidden = m.mode !== 'league' || !m.league || m.phase === 'lobby' || online.view === 'lobby';
+  const nextIn = m.league?.nextRoundIn ?? m.career?.nextStepIn, endsIn = m.league?.roundEndsIn ?? m.career?.stepEndsIn;
+  if (nextIn != null) online.nextRoundAt = performance.now() + nextIn;
+  online.roundEndsAt = endsIn != null ? performance.now() + endsIn : null;
+  if (m.career) careerAchievementsOnline(m.career, Achv.unlock);
+  $('#hubBtn').textContent = m.mode === 'career' ? 'Career' : 'League';
+  $('#hubBtn').hidden = !isMulti(m) || !(m.league || m.career) || m.phase === 'lobby' || online.view === 'lobby';
   // Played at leisure: you step away (keeping your seat) rather than leave
   $('#newBtn').textContent = m.pace === 'async' ? 'My games' : 'Leave game';
   renderTicker(m, online.fixtures, online.watching, online.view === 'watch');
   const v = online.view, idle = !ANIMATING.includes(state) && !online.queue.length && !online.overQueued;
   if (v === 'lobby') {
-    // A league round starting with our game in it: the start message takes over.
+    // A league round (or career step) starting with our game in it: the start message takes over.
     const mine = myFixture(m.fixtures, m.you);
-    if (m.mode === 'league' && m.phase !== 'lobby' && m.phase !== 'over' && !(mine && !mine.over)) return showHub();
+    if (isMulti(m) && m.phase !== 'lobby' && m.phase !== 'over' && !(mine && !mine.over)) return showHub();
+    if (m.mode === 'career' && m.phase === 'over') return showHub(); // a career that has stopped
     if (m.phase !== 'playing') showLobby();
     return;
   }
@@ -544,7 +551,7 @@ function onRoom(m) {
     if (m.phase !== 'playing' && v === 'game' && idle) showLobby();
     return;
   }
-  // League: our game (or the one we were watching) finished while we were away
+  // League or career: our game (or the one we were watching) finished while we were away
   const shown = (m.fixtures || []).find(f => f.id === online.watching);
   if ((v === 'game' || v === 'watch') && idle && (m.phase !== 'playing' || !shown || shown.over)) showHub();
 }
@@ -625,17 +632,21 @@ function showLobby() {
 function renderLobby() {
   const r = online.room;
   if (!r) return;
-  const host = r.you === r.host, league = r.mode === 'league', n = r.seats.length;
+  const host = r.you === r.host, league = r.mode === 'league', career = r.mode === 'career', n = r.seats.length;
   $('#lbTitle').textContent = `Room ${r.code}`;
   $('#lbLink').textContent = shareLink(r.code);
   $('#lbMode').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.mode === r.mode); b.disabled = !host; });
   const rounds = n + (n % 2) - 1;
   $('#lbModeNote').textContent = league
     ? `Everyone plays everyone once. Each round's games are played at the same time, and you can watch the others when yours is done.${n >= 2 ? ` ${n} players: ${rounds} round${rounds > 1 ? 's' : ''}.` : ''}`
+    : career ? 'Start together in the Sunday League, with computer players, and work your way up to the Premier League. There’s a cup too, and it goes on season after season. People can join any time and start the next season.'
     : '';
   const slow = r.pace === 'async';
+  // A career is always at your own pace
+  ['#lbPaceLabel', '#lbPace'].forEach(sel => $(sel).hidden = career);
   $('#lbPace').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.pace === r.pace); b.disabled = !host; });
-  $('#lbPaceNote').textContent = !slow ? 'Everyone plays together now.'
+  $('#lbPaceNote').textContent = career ? 'Played at your own pace: each round lasts up to a day, and moves on as soon as its games are done. Bots finish any games still going at the deadline.'
+    : !slow ? 'Everyone plays together now.'
     : league ? 'Play your turns whenever suits you, over days. Each round lasts up to a day, and moves on as soon as its games are done. Bots finish any games still going at the deadline.'
     : 'Play your turns whenever suits you, over days. If a turn waits two days, a bot plays it.';
   $('#lbTarget').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', +b.dataset.t === r.target); b.disabled = !host; });
@@ -645,11 +656,12 @@ function renderLobby() {
     <div class="slot ${away(s) ? 'away' : ''}"><span>${s.bot ? faceSVG(s.bot, 22) : `<i class="sw" style="background:${s.color}"></i>`}${esc(s.name)}
       ${i === r.you ? '<small>(you)</small>' : ''}${i === r.host ? '<small>· host</small>' : ''}${s.cpu ? `<small>· ${s.cpu}</small>` : ''}${away(s) ? '<small>· away</small>' : ''}</span>
       ${host && s.cpu ? `<button data-rm="${i}" aria-label="Remove ${esc(s.name)}">Remove</button>` : ''}</div>`).join('');
-  $('#lbAdd').hidden = !host || n >= r.maxSeats;
+  $('#lbAdd').hidden = !host || n >= r.maxSeats || career;
   $('#lbStart').hidden = !host;
-  $('#lbStart').textContent = league ? 'Start league' : 'Start game';
-  $('#lbStart').disabled = n < 2;
-  $('#lbWait').textContent = !host ? `Waiting for the host to start the ${league ? 'league' : 'game'}.`
+  $('#lbStart').textContent = league ? 'Start league' : career ? 'Start career' : 'Start game';
+  $('#lbStart').disabled = n < (career ? 1 : 2);
+  $('#lbWait').textContent = !host ? `Waiting for the host to start the ${league ? 'league' : career ? 'career' : 'game'}.`
+    : career ? 'Start when you like. Anyone who joins later starts at the beginning of the next season.'
     : n < 2 ? 'Share the link, or add a computer player, to start.'
     : slow ? 'Start when everyone’s in. You can close this and come back: it’s in My games.' : '';
 }
@@ -663,6 +675,12 @@ function showHub() {
 }
 function peekHub() { refreshHub(); $('#hub').hidden = false; }
 function refreshHub() {
+  if (online?.room?.career) {
+    const r = online.room, now = performance.now();
+    return renderCareerHub({ room: r, fixtures: online.fixtures, you: online.seat, view: online.view, watching: online.watching, tier: online.careerTier ?? null,
+      msToNext: r.phase === 'between' && online.nextRoundAt ? Math.max(0, online.nextRoundAt - now) : null,
+      stepLeft: online.roundEndsAt ? Math.max(0, online.roundEndsAt - now) : null });
+  }
   if (!online?.room?.league) return;
   const secsToNext = online.room.phase === 'between' && online.nextRoundAt ? Math.max(0, Math.ceil((online.nextRoundAt - performance.now()) / 1000)) : null;
   const roundLeft = online.roundEndsAt ? Math.max(0, online.roundEndsAt - performance.now()) : null;
@@ -704,7 +722,8 @@ const holdNewRound = () => isAsync() && online.view === 'hub';
 function hold(msgs) {
   online.held = msgs;
   refreshHub();
-  toast(`Round ${online.room?.league?.round ?? ''} has started. Tap Play when you’re ready.`, 3500, true);
+  const r = online.room, round = r?.career ? Career.stepName(r.career.state) : `Round ${r?.league?.round ?? ''}`;
+  toast(`${round} has started. Tap Play when you’re ready.`, 3500, true);
 }
 function playHeld() {
   const [start, ...rest] = online.held;
@@ -751,7 +770,7 @@ function onlineSync(m) {
   // Achievements count in our own game; joining partway (a rejoin) doesn't count as the opening throw
   if (online.view === 'game') Achv.gameStarted(game.players.map((p, i) => isMe(i)), { midway: m.t === 'sync' }); else Achv.gameLeft();
   state = 'remote'; renderBoard(); refreshEmotes();
-  $('#hubBtn').hidden = online.room?.mode !== 'league';
+  $('#hubBtn').hidden = !isMulti(online.room);
   renderTicker(online.room, online.fixtures, online.watching, online.view === 'watch');
   if (m.t === 'sync' && m.over) return online.view === 'watch' ? showHub() : null;
   // Back to a game played at leisure: the throws you missed follow, then your turn
@@ -847,7 +866,7 @@ function finishOnlineThrow() {
   const m = online.pending;
   online.pending = null;
   snapPoses(m.poses);
-  if (m.over) return online.room?.mode === 'league' ? showHub() : showOver();
+  if (m.over) return isMulti(online.room) ? showHub() : showOver();
   game.cur = m.game.cur;
   state = 'remote'; // the next turn message is already queued
 }
@@ -890,8 +909,15 @@ $('#hubBtns').addEventListener('click', e => {
   else if (act === 'next') net.send({ t: 'next' });
   else if (act === 'room') showLobby();
   else if (act === 'mine') stepAway();
-  else if (act === 'leave') { if (online.room.phase === 'over' || confirm('Leave the league? The computer will play your remaining games.')) leaveOnline(); }
+  else if (act === 'leave') {
+    const sure = online.room.phase === 'over' || confirm(online.room.mode === 'career'
+      ? 'Leave the career? The computer will play your games until the end of the season, then a computer player takes your place.'
+      : 'Leave the league? The computer will play your remaining games.');
+    if (sure) leaveOnline();
+  }
 });
+// Career: which league's table to show
+$('#hcTiers').addEventListener('click', e => { const b = e.target.closest('button[data-tier]'); if (b) { online.careerTier = +b.dataset.tier; refreshHub(); } });
 $('#hubLive').addEventListener('click', e => {
   const b = e.target.closest('button[data-act]');
   if (b?.dataset.act === 'watch') watchMatch(b.dataset.match);
@@ -916,9 +942,11 @@ const personalLink = () => { const u = new URL(location.href); u.search = ''; u.
 function mineStatus(g) {
   const m = g.match, lg = g.league;
   if (g.phase === 'lobby') return g.host ? 'Waiting for you to start it' : 'Waiting for the host to start';
-  if (g.phase === 'over') return lg ? `Finished · you came ${ordinal(lg.place)}` : 'Finished';
+  if (g.phase === 'over') return lg ? `Finished · you came ${ordinal(lg.place)}` : g.career ? 'Stopped' : 'Finished';
+  if (g.career?.waiting) return 'Waiting for the next season to start';
   if (m?.yourTurn) return `Your turn${m.unseen ? ` · ${m.unseen} new throw${m.unseen > 1 ? 's' : ''} to watch` : ''}`;
   if (m && !m.over) return `Waiting for ${m.turnOf}`;
+  if (g.phase === 'between') return g.career?.step >= g.career?.steps ? 'Season over · the next one starts soon' : 'The next round starts soon';
   return 'Your game is done · waiting for the round to finish';
 }
 function renderMine(games) {
@@ -928,11 +956,13 @@ function renderMine(games) {
   $('#mineSub').textContent = !games.length ? '' : turns ? `It’s your turn in ${turns} game${turns > 1 ? 's' : ''}.` : 'Nothing waiting for you right now.';
   $('#mineList').innerHTML = games.map(g => {
     const lg = g.league, m = g.match;
+    const cr = g.career;
     const what = g.mode === 'league'
       ? `League${lg ? ` · round ${lg.round} of ${lg.rounds}` : ''}${g.pace === 'async' ? '' : ' · live'}`
+      : g.mode === 'career' ? `Career${cr ? ` · season ${cr.season}${cr.waiting ? '' : ` · ${Career.tierName(cr.tier)}, ${ordinal(cr.place)}`}` : ''}`
       : `Game with ${g.players.filter(n => n !== g.you).map(esc).join(', ') || 'nobody yet'}`;
     const score = m && g.phase !== 'lobby' ? ` · ${m.players.map(p => `${esc(p.name)} ${p.score}`).join(', ')}` : '';
-    const ends = lg?.roundEndsIn ? ` · round ends in ${timeLeft(lg.roundEndsIn)}` : m?.deadline ? ` · ${timeLeft(m.deadline)} left` : '';
+    const ends = lg?.roundEndsIn ? ` · round ends in ${timeLeft(lg.roundEndsIn)}` : cr?.stepEndsIn && m && !m.over ? ` · round ends in ${timeLeft(cr.stepEndsIn)}` : m?.deadline ? ` · ${timeLeft(m.deadline)} left` : '';
     const go = m?.yourTurn || (g.phase === 'lobby' && g.host);
     return `<div class="fx"><span class="what"><b>${what}</b><span class="status ${go ? 'go' : ''}">${mineStatus(g)}${ends}</span>
       <span class="status">Room ${g.code}${score}</span></span>
