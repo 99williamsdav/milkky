@@ -11,7 +11,7 @@
 // nextSeason() moves everyone up and down and starts the next one.
 import { aiFromSkill, simulateGame } from './ai.js';
 import { roundRobin, peopleLast } from './schedule.js';
-import { botById, startingTiers, TIERS } from './roster.js';
+import { ROSTER, botById, startingTiers, TIERS } from './roster.js';
 
 export const SIZE = 8, UP = 2, DOWN = 2; // per league; promoted and relegated each season
 export const BOTTOM = TIERS.length - 1;
@@ -154,10 +154,24 @@ export function playStep(c, results = {}, rng = Math.random) {
 }
 
 // ---------- Between seasons ----------
+// Someone who has left: a bot who isn't in the career takes their place (the one whose skill best suits that
+// league). If every bot is already in, they stay, and are played by a bot.
+function replacePerson(c, id) {
+  c.waiting = c.waiting.filter(x => x !== id);
+  const t = tierOf(c, id);
+  if (t < 0) return;
+  const inUse = new Set(c.tiers.flat()), free = ROSTER.filter(b => !inUse.has(b.id));
+  if (!free.length) return;
+  const bots = c.tiers[t].filter(x => !isPerson(x)).map(botById);
+  const want = bots.length ? bots.reduce((s, b) => s + b.skill, 0) / bots.length : 0.5;
+  const pick = free.reduce((best, b) => (Math.abs(b.skill - want) < Math.abs(best.skill - want) ? b : best));
+  c.tiers[t][c.tiers[t].indexOf(id)] = pick.id;
+}
 // Move the top 2 of each league up and the bottom 2 down, bring in anyone waiting, and start the next season.
+// remove: people who have left, replaced by bots for the new season.
 // Leaves c.summary saying what happened: { season, champions (ids by league), cup (winner id), moves: [{ id, from, to }],
 //   people: { [id]: { tier, pos (1 = top), newTier, promoted, relegated, inARow, champion, cupWinner, unbeaten } } }
-export function nextSeason(c, rng = Math.random) {
+export function nextSeason(c, rng = Math.random, { remove = [] } = {}) {
   const order = c.tiers.map((ids, t) => standings(c, t).map(e => e.id));
   const moves = [];
   const tiers = order.map((o, t) => {
@@ -180,6 +194,7 @@ export function nextSeason(c, rng = Math.random) {
   }));
   c.summary = { season: c.season, champions: order.map(o => o[0]), cup: c.cup.winner, moves, people };
   c.tiers = tiers;
+  for (const id of remove) replacePerson(c, id);
   for (const id of c.waiting) addPerson(c.tiers, id);
   c.waiting = [];
   c.season++;

@@ -78,7 +78,7 @@ function onMessage(ws, m) {
       if (!room) return send(ws, { t: 'error', msg: 'No room with that code' });
       const mine = room.findSeat(null, m.me); // already in this room (e.g. followed its link again): back to that seat
       if (mine) { room.reattach(mine, ws); return enter(ws, room, mine); }
-      if (!room.canJoin()) return send(ws, { t: 'error', msg: room.phase === 'playing' ? 'That game has already started' : 'That room is full' });
+      if (!room.canJoin()) return send(ws, { t: 'error', msg: room.inProgress && room.mode !== 'career' ? 'That game has already started' : 'That room is full' });
       enter(ws, room, room.addHuman(ws, m.name, m.me));
       return abandon(m.leave, ws); // only once the new room has let us in
     }

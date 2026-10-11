@@ -5,13 +5,18 @@ A room plays either a single game or a league (everyone plays everyone once, eac
 at one of two paces: `live` (everyone plays together now) or `async` ("take your time": turns whenever suits, over days;
 seats are kept while people are away, a league round lasts up to a day and moves on as soon as its games are done,
 bots finish games still going at the deadline, and returning players first watch the throws they missed).
+A room can also hold a career (always `async`): the people join three leagues of the roster's bots, with promotion,
+relegation and a cup, season after season (rules in `../src/shared/career.js`). Each step of a season (a league round or
+a cup round) plays the games with a person in them for real and simulates the rest. People can join at any time and
+start the next season in the Sunday League; anyone who leaves is played by a bot, then replaced by one when the season
+ends. A career stops if everyone has left or nobody has visited for `MILKKY_CAREER_IDLE_DAYS` (30).
 Each browser has a player key (`me`), sent when creating or joining, which finds all your games across rooms.
 It imports the game code from `../src/shared/`, so deploy it alongside `src/`.
 
 ```
 npm install
 npm start          # PORT (default 8080), HOST (default 127.0.0.1)
-npm test           # single game, stand-ins, live league, restarting mid-game, and an async league, against a real server
+npm test           # career rules, an online career, single game, stand-ins, live league, restarting mid-game, and an async league
 ```
 
 `GET /health` → `ok <n> rooms`. WebSocket at `/ws`. All messages are JSON with a `t` field.
@@ -22,11 +27,12 @@ Games are saved to disk (one JSON file per room) and picked up again after a res
 Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits), `MILKKY_TURN_SECONDS` (45),
 `MILKKY_AWAY_SECONDS` (10), `MILKKY_BETWEEN_SECONDS` (20, between live league rounds), `MILKKY_ASYNC_BETWEEN_SECONDS`
 (120, between async league rounds), `MILKKY_ROUND_SECONDS`
-(86400, longest async league round), `MILKKY_ASYNC_TURN_HOURS` (48, async single game).
+(86400, longest async league round or career step), `MILKKY_ASYNC_TURN_HOURS` (48, async single game),
+`MILKKY_SEASON_BREAK_SECONDS` (900, between career seasons).
 
 ## Code
 
-- `room.js`: lobby, seats, single game or league (schedule, rounds, table).
+- `room.js`: lobby, seats, single game, league (schedule, rounds, table) or career (steps, seasons).
 - `match.js`: one game: physics world, turns, turn timer, computer stand-ins.
 - `sim.js`: runs a throw to rest and records it.
 - `store.js`: saves rooms to disk and loads them at startup.
@@ -36,18 +42,18 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `t` | fields | notes |
 |---|---|---|
 | `create` | `name`, `me`, `leave?` | new room; you are the host |
-| `join` | `code`, `name`, `me`, `leave?` | only between games; 4 seats for a game, 8 for a league (already in it: back to your seat) |
+| `join` | `code`, `name`, `me`, `leave?` | only between games (a career: any time); 4 seats for a game, 8 for a league, 16 for a career (already in it: back to your seat) |
 | `rejoin` | `code`, `token` or `me` | after a refresh (token from `joined`), or opening a game from My games (`me`) |
 | `mine` | `me` | your games across all rooms (any time, in a room or not) |
 | `leave` | | during a game or league, the computer plays your seat from then on |
 | `detach` | | step away from an async game, keeping your seat |
 | `pace` | `pace` (`live`/`async`) | host, between games |
-| `mode` | `mode` (`game`/`league`) | host, between games |
+| `mode` | `mode` (`game`/`league`/`career`) | host, between games; a career is `async` and removes added bots |
 | `target` | `target` (20, 30 or 50) | host, between games |
-| `addCpu` | `level` (`easy`/`medium`/`hard`) | host, between games |
+| `addCpu` | `level` (`easy`/`medium`/`hard`) | host, between games (not in a career) |
 | `removeCpu` | `seat` | host, between games |
 | `start` | | host; also starts a rematch or a new league |
-| `next` | | host: start the next league round now |
+| `next` | | host: start the next league round (or career step) now |
 | `watch` | `match` (or null to stop) | watch another fixture; replies with its `sync` (your own match: back into it) |
 | `aim` | `aim`, `pull` | current thrower's live aim, relayed to others |
 | `emote` | `match`, `e` (`smile`/`laugh`/`sad`/`angry`) | a quick face to everyone playing or watching that game (at most one every 0.6 s) |
@@ -60,9 +66,9 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `t` | fields |
 |---|---|
 | `joined` | `code`, `token`, `you` (seat index) |
-| `mine` | `games[{code, mode, pace, phase, target, you, host, players, league?{round, rounds, roundEndsIn, place}, match?{yourTurn, turnOf, unseen, deadline, over, players}}]` |
-| `room` | `code`, `mode`, `pace`, `phase`, `target`, `host`, `you`, `maxSeats`, `seats[{name, cpu, color, connected, left}]`, `league`, `fixtures` |
-| `fixtures` | `fixtures` (live scores, league only, after every throw) |
+| `mine` | `games[{code, mode, pace, phase, target, you, host, players, league?{round, rounds, roundEndsIn, place}, career?{season, step, steps, waiting, tier, place, stepEndsIn}, match?{yourTurn, turnOf, unseen, deadline, over, players}}]` |
+| `room` | `code`, `mode`, `pace`, `phase`, `target`, `host`, `you`, `maxSeats`, `seats[{name, cpu, color, connected, left}]`, `league`, `career?{state, people{[id]: {name, seat, left}}, you, nextStepIn, stepEndsIn}` (`state` is the shared career state; people's ids start with `@`), `fixtures` (career: each with its `key`) |
+| `fixtures` | `fixtures` (live scores, league or career, after every throw) |
 | `start` | `match`, `game`, `poses` (sent to the match's players) |
 | `sync` | `match`, `game`, `poses`, `over`, `turn`, `watchers`, `replay?` (on rejoin, or when you start watching; with `replay` the `throw`s you missed follow, then the current `turn`) |
 | `turn` | `match`, `cur`, `deadline?` (ms left), `cpu?{aim, target}`, `standIn?` |

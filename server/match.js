@@ -35,7 +35,8 @@ export class Match {
     settle(this.physics);
     this.rng = mulberry32((Math.random() * 2 ** 32) >>> 0);
     this.game = {
-      players: seats.map((s, i) => newPlayer(s.name, s.cpu ? LEVELS[s.cpu] : null, COLORS[i])),
+      // Bots play at their level, or (career bots) their own skill
+      players: seats.map((s, i) => newPlayer(s.name, s.cpu ? s.ai || LEVELS[s.cpu] : null, COLORS[i])),
       cur: first, target, winner: null,
     };
     this.spectators = new Set();
