@@ -156,6 +156,7 @@ export class Match {
     this.deadline = this.turnTime ? this.turnStart + this.turnTime : null;
     this.turnInfo = { cur: i };
     this.send({ t: 'turn', ...this.turnNow() });
+    this.room.turnWaiting?.(seat, this); // a notification, if they're not looking
     this.armTurnTimer();
   }
   // A person's turn ends at the deadline (if there is one), or, live, sooner if they've lost their connection.

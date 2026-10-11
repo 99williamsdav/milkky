@@ -16,7 +16,7 @@ It imports the game code from `../src/shared/`, so deploy it alongside `src/`.
 ```
 npm install
 npm start          # PORT (default 8080), HOST (default 127.0.0.1)
-npm test           # career rules, an online career, single game, stand-ins, live league, restarting mid-game, and an async league
+npm test           # career rules, an online career, push notifications, single game, stand-ins, live league, restarting mid-game, and an async league
 ```
 
 `GET /health` → `ok <n> rooms`. WebSocket at `/ws`. All messages are JSON with a `t` field.
@@ -30,12 +30,28 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 (86400, longest async league round or career step), `MILKKY_ASYNC_TURN_HOURS` (48, async single game),
 `MILKKY_SEASON_BREAK_SECONDS` (900, between career seasons).
 
+## Push notifications
+
+For games played at leisure, people who aren't looking get a notification when it's their turn (once, until they
+come back), when an async round is about to run out with their game unfinished (`MILKKY_REMIND_HOURS`, 3, before the
+deadline), and when a new career season starts. Browsers subscribe through `src/sw.js`; subscriptions are kept by
+player key in `push.json` in the data folder. Push needs a VAPID key pair, generated once:
+
+```
+npx web-push generate-vapid-keys
+```
+
+then in `/etc/milkky/<env>.env`: `MILKKY_VAPID_PUBLIC=...`, `MILKKY_VAPID_PRIVATE=...` and
+`MILKKY_VAPID_SUBJECT=mailto:you@example.com`. Without them push is off and the game doesn't offer it.
+(Tests set `MILKKY_PUSH_LOG` to log notifications to a file instead.)
+
 ## Code
 
 - `room.js`: lobby, seats, single game, league (schedule, rounds, table) or career (steps, seasons).
 - `match.js`: one game: physics world, turns, turn timer, computer stand-ins.
 - `sim.js`: runs a throw to rest and records it.
 - `store.js`: saves rooms to disk and loads them at startup.
+- `push.js`: push subscriptions, and sending notifications.
 
 ## Client → server
 
@@ -45,6 +61,10 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `join` | `code`, `name`, `me`, `leave?` | only between games (a career: any time); 4 seats for a game, 8 for a league, 16 for a career (already in it: back to your seat) |
 | `rejoin` | `code`, `token` or `me` | after a refresh (token from `joined`), or opening a game from My games (`me`) |
 | `mine` | `me` | your games across all rooms (any time, in a room or not) |
+| `pushKey` | | the key to subscribe to notifications with (any time) |
+| `pushSubscribe` | `me`, `sub` (the browser's PushSubscription as JSON) | notifications for this device (any time) |
+| `pushUnsubscribe` | `me`, `endpoint` | no more notifications for this device |
+| `visible` | `visible` | in a room: the page was hidden or shown (only people not looking are notified) |
 | `leave` | | during a game or league, the computer plays your seat from then on |
 | `detach` | | step away from an async game, keeping your seat |
 | `pace` | `pace` (`live`/`async`) | host, between games |
@@ -66,6 +86,8 @@ Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits
 | `t` | fields |
 |---|---|
 | `joined` | `code`, `token`, `you` (seat index) |
+| `pushKey` | `key` (null: push is off) |
+| `pushSubscribed` | `ok` |
 | `mine` | `games[{code, mode, pace, phase, target, you, host, players, league?{round, rounds, roundEndsIn, place}, career?{season, step, steps, waiting, tier, place, stepEndsIn}, match?{yourTurn, turnOf, unseen, deadline, over, players}}]` |
 | `room` | `code`, `mode`, `pace`, `phase`, `target`, `host`, `you`, `maxSeats`, `seats[{name, cpu, color, connected, left}]`, `league`, `career?{state, people{[id]: {name, seat, left}}, you, nextStepIn, stepEndsIn}` (`state` is the shared career state; people's ids start with `@`), `fixtures` (career: each with its `key`) |
 | `fixtures` | `fixtures` (live scores, league or career, after every throw) |

@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import RAPIER_MOD from '@dimforge/rapier3d-compat';
 import { Room, hashKey } from './room.js';
 import * as store from './store.js';
+import * as push from './push.js';
 
 const RAPIER = RAPIER_MOD.default || RAPIER_MOD;
 await RAPIER.init();
@@ -59,6 +60,10 @@ function onMessage(ws, m) {
     const games = me ? [...rooms.values()].map(r => r.summaryFor(me)).filter(Boolean) : [];
     return send(ws, { t: 'mine', games });
   }
+  // Push notifications (any time): the key to subscribe with (null: push is off), and (un)subscribing a device
+  if (m.t === 'pushKey') return send(ws, { t: 'pushKey', key: push.publicKey });
+  if (m.t === 'pushSubscribe') return send(ws, { t: 'pushSubscribed', ok: push.subscribe(hashKey(m.me), m.sub) });
+  if (m.t === 'pushUnsubscribe') { push.unsubscribe(hashKey(m.me), String(m.endpoint ?? '')); return send(ws, { t: 'pushSubscribed', ok: false }); }
   if (ws.room) {
     const { room, seat } = ws;
     // leave: give up the seat (the computer plays it from now on). detach: just step away (async), keeping it.

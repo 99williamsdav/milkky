@@ -16,6 +16,7 @@ import { roundRobin, peopleLast } from '../src/shared/schedule.js';
 import * as Career from '../src/shared/career.js';
 import { Match, TURN_TIME, ASYNC_TURN_TIME } from './match.js';
 import * as store from './store.js';
+import * as push from './push.js';
 
 const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[name] : fallback);
 export const MAX_SEATS = { game: 4, league: 8, career: 16 };
@@ -30,6 +31,7 @@ const ASYNC_BETWEEN_ROUNDS = env('MILKKY_ASYNC_BETWEEN_SECONDS', 120) * 1000; //
 const ROUND_TIME = env('MILKKY_ROUND_SECONDS', 24 * 3600) * 1000; // async league: longest a round can last
 const SEASON_BREAK = env('MILKKY_SEASON_BREAK_SECONDS', 15 * 60) * 1000; // career: pause between seasons
 const CAREER_IDLE = env('MILKKY_CAREER_IDLE_DAYS', 30) * 24 * 3600_000;  // career: stops after this long with nobody visiting
+const REMIND_BEFORE = env('MILKKY_REMIND_HOURS', 3) * 3600_000;           // async rounds: a reminder this long before the deadline
 const RESTART_GRACE = 20_000; // live: after a server restart, extra time for players to reconnect before bots take their turns
 
 export const cleanName = s => String(s ?? '').replace(/[\u0000-\u001f<>&"'`]/g, '').trim().slice(0, 16);
@@ -110,6 +112,7 @@ export class Room {
     if (seat.ws && seat.ws !== ws) { seat.ws.room = seat.ws.seat = null; seat.ws.close(4000, 'Opened somewhere else'); }
     clearTimeout(seat.dropTimer);
     seat.ws = ws; seat.connected = true; this.emptySince = null; this.lastVisit = Date.now();
+    seat.visible = true; seat.notified = false;
     this.matches.forEach(m => m.seatChanged(seat));
   }
   stopWatching(seat) {
@@ -117,7 +120,7 @@ export class Room {
   }
   // `left`: the player chose to go (or moved to another room), rather than losing the connection.
   disconnect(seat, { left = false } = {}) {
-    seat.ws = null; seat.connected = false; seat.awaySince = Date.now();
+    seat.ws = null; seat.connected = false; seat.awaySince = Date.now(); seat.visible = false;
     if (left) seat.left = true;
     this.stopWatching(seat);
     if (this.inProgress) {
@@ -301,6 +304,10 @@ export class Room {
         seat.lastEmote = now;
         return match.send({ t: 'emote', e: m.e, name: seat.name, seat: this.seatIndex(seat) });
       }
+      case 'visible': // the page was hidden or shown (so we know whether a notification would help)
+        seat.visible = !!m.visible;
+        if (seat.visible) seat.notified = false;
+        return;
       case 'aim': return this.matchOf(seat)?.aim(seat, m);
       case 'throw': {
         const match = this.inProgress && this.matchOf(seat);
@@ -361,11 +368,41 @@ export class Room {
     this.broadcastRoom();
     this.matches.forEach(m => m.start());
   }
-  // Async: when the round's time is up, bots finish every game still going
+  // Async: when the round's time is up, bots finish every game still going. A little before, people whose
+  // games aren't done get a reminder.
   armRoundDeadline(at) {
     this.roundEndsAt = at;
-    clearTimeout(this.timer);
+    clearTimeout(this.timer); clearTimeout(this.reminder);
     this.timer = setTimeout(() => this.matches.forEach(m => m.finishWithBots()), Math.max(0, at - Date.now()));
+    if (at - REMIND_BEFORE > Date.now()) this.reminder = setTimeout(() => this.remindUnfinished(), at - REMIND_BEFORE - Date.now());
+  }
+  remindUnfinished() {
+    const h = Math.round(REMIND_BEFORE / 3600_000), mins = Math.max(1, Math.round(REMIND_BEFORE / 60_000));
+    const left = h >= 1 ? `${h} hour${h === 1 ? '' : 's'}` : `${mins} minute${mins === 1 ? '' : 's'}`;
+    for (const m of this.matches.filter(m => !m.over)) {
+      for (const seat of m.seats) {
+        const others = m.seats.filter(s => s !== seat).map(s => s.name).join(' and ');
+        this.notify(seat, { title: `${left} left to play`,
+          body: `Your game against ${others} isn't finished. After that, bots finish it for you.` }, { force: true });
+      }
+    }
+  }
+
+  // ---------- Notifications ----------
+  // A push notification for someone not looking at the game (games at leisure only). Once sent, no more until
+  // they come back, except reminders (force).
+  notify(seat, msg, { force = false } = {}) {
+    if (!this.async || this.restoring || !seat?.me || seat.cpu || seat.left || (seat.connected && seat.visible !== false)) return;
+    if (seat.notified && !force) return;
+    seat.notified = true;
+    push.notify(seat.me, { ...msg, room: this.code });
+  }
+  // It's a person's turn (called by the match)
+  turnWaiting(seat, m) {
+    if (!this.async) return;
+    const others = m.seats.filter(s => s !== seat).map(s => s.name).join(' and ');
+    const when = this.mode === 'career' ? `${Career.stepName(this.career)}: ` : this.mode === 'league' ? `Round ${this.league.round + 1}: ` : '';
+    this.notify(seat, { title: 'Your turn in Milkky', body: `${when}${when ? 'your' : 'Your'} game against ${others} is waiting for you.` });
   }
   fixtureOver(m, a, b) {
     const lg = this.league, [pa, pb] = m.game.players;
@@ -379,7 +416,7 @@ export class Room {
   }
   endRound() {
     const lg = this.league;
-    clearTimeout(this.timer); this.roundEndsAt = null;
+    clearTimeout(this.timer); clearTimeout(this.reminder); this.roundEndsAt = null;
     if (lg.round >= lg.schedule.length - 1) {
       this.phase = 'over';
       this.dropAbsentSeats();
@@ -432,7 +469,7 @@ export class Room {
   }
   // Every played game is done: simulate the rest of the step, then pause (longer at the end of a season)
   endStep() {
-    clearTimeout(this.timer); this.roundEndsAt = null;
+    clearTimeout(this.timer); clearTimeout(this.reminder); this.roundEndsAt = null;
     Career.playStep(this.career, this.stepResults);
     this.stepResults = {};
     const pause = Career.seasonOver(this.career) ? SEASON_BREAK : ASYNC_BETWEEN_ROUNDS;
@@ -453,6 +490,10 @@ export class Room {
       const gone = this.seats.filter(s => s.left && s.pid);
       Career.nextSeason(c, Math.random, { remove: gone.map(s => s.pid) });
       gone.filter(s => !Career.inCareer(c, s.pid)).forEach(s => this.removeSeat(s));
+      for (const s of this.seats) {
+        const tier = Career.tierOf(c, s.pid);
+        if (tier >= 0) this.notify(s, { title: `Season ${c.season} has started`, body: `You’re in the ${Career.tierName(tier)}. Your first game is ready.` });
+      }
     }
     this.startStep();
   }
@@ -502,7 +543,9 @@ export class Room {
           : () => room.gameOver()));
     // Carry on: unfinished games continue, round timers resume, and live lobby seats that nobody comes
     // back for are let go as usual.
+    room.restoring = true; // (turns picking up again aren't news: no notifications)
     room.matches.forEach(m => m.resume());
+    room.restoring = false;
     if (room.phase === 'between') {
       room.timer = setTimeout(() => (room.mode === 'career' ? room.careerNext() : room.startRound()), Math.max(0, d.nextRoundAt - Date.now()));
     }
@@ -516,5 +559,5 @@ export class Room {
   }
 
   disposeMatches() { this.matches.forEach(m => m.dispose()); this.matches = []; }
-  dispose() { clearTimeout(this.timer); this.disposeMatches(); this.seats.forEach(s => clearTimeout(s.dropTimer)); }
+  dispose() { clearTimeout(this.timer); clearTimeout(this.reminder); this.disposeMatches(); this.seats.forEach(s => clearTimeout(s.dropTimer)); }
 }

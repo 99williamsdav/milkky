@@ -33,20 +33,23 @@ export function myKey() {
 export function setKey(k) { try { localStorage.setItem(PLAYER_KEY, k); } catch (e) {} }
 export const validKey = k => typeof k === 'string' && /^[A-Za-z0-9_-]{16,100}$/.test(k);
 
-// Your games across all rooms, over a short-lived connection of its own
-export function fetchMine() {
+// A question for the server over a short-lived connection of its own: send msg, resolve with the first reply of
+// type `reply`
+export function ask(msg, reply) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(serverUrl());
     const fail = err => { clearTimeout(timer); try { ws.close(); } catch (e) {} reject(err); };
     const timer = setTimeout(() => fail(new Error('timeout')), 8000);
-    ws.onopen = () => ws.send(JSON.stringify({ t: 'mine', me: myKey() }));
+    ws.onopen = () => ws.send(JSON.stringify(msg));
     ws.onmessage = e => {
       const m = JSON.parse(e.data);
-      if (m.t === 'mine') { clearTimeout(timer); ws.close(); resolve(m.games); }
+      if (m.t === reply) { clearTimeout(timer); ws.close(); resolve(m); }
     };
     ws.onerror = () => fail(new Error('unreachable'));
   });
 }
+// Your games across all rooms
+export const fetchMine = () => ask({ t: 'mine', me: myKey() }, 'mine').then(m => m.games);
 
 // onMessage(msg) for every server message; onStatus('open' | 'reconnecting' | 'failed' | 'closed')
 export function createNet(onMessage, onStatus) {

@@ -13,6 +13,7 @@ import * as Career from '../shared/career.js';
 import { showMilkKing } from './milkking.js';
 import { faceSVG } from './faces.js';
 import * as Achv from './achievements.js';
+import * as Push from './push.js';
 import { botById } from '../shared/roster.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
@@ -622,12 +623,43 @@ function showEmote(m) {
   setTimeout(() => el.remove(), 2600);
 }
 
+// Push notifications: offered on My games, and in rooms played at leisure (where you're often away)
+let pushNow = null; // the last known state (see push.js)
+const PUSH_TEXT = {
+  off: 'Get a notification when it’s your turn.',
+  on: 'Notifications are on for this device.',
+  blocked: 'Notifications are blocked for this site in your browser’s settings.',
+  homescreen: 'For notifications on an iPhone or iPad, add Milkky to your Home Screen (Share, then Add to Home Screen) and open it from there.',
+};
+function renderPush() {
+  document.querySelectorAll('[data-push]').forEach(el => {
+    const inRoom = el.dataset.push === 'room';
+    // In a room only when it's played at leisure, and only to suggest turning them on
+    el.hidden = !pushNow || pushNow === 'unavailable' || (inRoom && (online?.room?.pace !== 'async' || pushNow === 'on'));
+    if (el.hidden) return;
+    const btn = pushNow === 'off' ? '<button class="primary" data-push-act="on">Notify me</button>'
+      : pushNow === 'on' ? '<button data-push-act="off">Turn off</button>' : '';
+    el.innerHTML = `<span>${PUSH_TEXT[pushNow]}</span>${btn}`;
+  });
+}
+async function updatePush() { pushNow = await Push.pushState(); renderPush(); }
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-push-act]');
+  if (!b) return;
+  b.disabled = true;
+  try { pushNow = b.dataset.pushAct === 'on' ? await Push.turnOn() : await Push.turnOff(); }
+  catch (err) { toast('Couldn’t turn on notifications here', 2500); }
+  if (pushNow === 'on' && b.dataset.pushAct === 'on') toast('Notifications on', 1500);
+  renderPush();
+});
+
 // Lobby
 function showLobby() {
   online.view = 'lobby'; online.overQueued = false; state = 'menu'; renderWatchers();
   ['#over', '#online', '#setup', '#hub'].forEach(s => $(s).hidden = true);
   $('#hubBtn').hidden = true;
   renderLobby(); $('#lobby').hidden = false;
+  updatePush();
 }
 function renderLobby() {
   const r = online.room;
@@ -660,6 +692,7 @@ function renderLobby() {
   $('#lbStart').hidden = !host;
   $('#lbStart').textContent = league ? 'Start league' : career ? 'Start career' : 'Start game';
   $('#lbStart').disabled = n < (career ? 1 : 2);
+  renderPush(); // (the pace may have changed)
   $('#lbWait').textContent = !host ? `Waiting for the host to start the ${league ? 'league' : career ? 'career' : 'game'}.`
     : career ? 'Start when you like. Anyone who joins later starts at the beginning of the next season.'
     : n < 2 ? 'Share the link, or add a computer player, to start.'
@@ -672,6 +705,7 @@ function showHub() {
   online.turnEndsAt = null; renderWatchers();
   ['#over', '#online', '#setup', '#lobby'].forEach(s => $(s).hidden = true);
   refreshHub(); $('#hub').hidden = false;
+  updatePush();
 }
 function peekHub() { refreshHub(); $('#hub').hidden = false; }
 function refreshHub() {
@@ -744,7 +778,11 @@ function catchUp() {
   }
   $('#toast').classList.remove('show');
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'online' && online) catchUp(); });
+document.addEventListener('visibilitychange', () => {
+  if (mode !== 'online' || !online) return;
+  if (document.hidden) catchUp();
+  net.send({ t: 'visible', visible: !document.hidden }); // the server only notifies people who aren't looking
+});
 function applyGame(g) {
   game.players = g.players.map(p => ({ ...p }));
   game.cur = g.cur; game.target = g.target;
@@ -935,6 +973,7 @@ async function openMine() {
   $('#mineSub').textContent = 'Loading…'; $('#mineList').innerHTML = '';
   $('#mineLink').textContent = personalLink();
   $('#mine').hidden = false;
+  updatePush();
   try { renderMine(await fetchMine()); }
   catch (e) { $('#mineSub').textContent = 'Can’t reach the game server just now. Try again in a moment.'; }
 }
@@ -979,6 +1018,7 @@ async function refreshMineBtn() {
   const btn = $('#mineBtn');
   btn.hidden = !hasKey();
   if (btn.hidden) return;
+  Push.refresh(); // keep the server's record of this device's notifications up to date
   btn.textContent = 'My games';
   try {
     const turns = (await fetchMine()).filter(g => g.match?.yourTurn).length;

@@ -1,0 +1,14 @@
+{
+  "name": "Milkky",
+  "short_name": "Milkky",
+  "description": "Knock the numbered bottles and hit the target score exactly.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#4e8231",
+  "theme_color": "#4e8231",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
