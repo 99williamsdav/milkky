@@ -9,6 +9,7 @@ import { app, renderer, canvas, scene, camera } from './scene.js';
 import { decorateBottles, stickMesh, hand, aimGeo, aimLine, landRing } from './models.js';
 import { clearMilk, updateMilk } from './milk.js';
 import * as League from './league.js';
+import * as Career from '../shared/career.js';
 import { showMilkKing } from './milkking.js';
 import { faceSVG } from './faces.js';
 import * as Achv from './achievements.js';
@@ -242,88 +243,87 @@ function showOver() {
   if (mode === 'online') online.view = 'over';
 }
 
-// ---------- League ----------
+// ---------- Career Mode ----------
 const dots = sk => '●'.repeat(Math.round(1 + sk * 4)) + '○'.repeat(4 - Math.round(sk * 4));
 const ordinal = n => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
-// A name with its face (bots) for the league screens
-const who = e => e.human ? '<b>You</b>' : `<span class="who">${faceSVG(e.bot, 22)}${esc(e.name)}</span>`;
+const solo = () => League.solo.career;
+const YOU = League.ME;
+const nameOf = id => (id === YOU ? 'You' : Career.entryFor(id).name);
+// A name with its face (bots) for the career screens
+const who = id => id === YOU ? '<b>You</b>' : `<span class="who">${faceSVG(id, 22)}${esc(nameOf(id))}</span>`;
 function renderLeague() {
-  const { league, lastRound, summary } = League.lg, tier = league.tier;
-  const leagueOver = League.leagueDone(), done = League.seasonDone(), next = League.nextEvent();
-  const above = tier > 0 ? League.tierName(tier - 1) : null, below = tier < 2 ? League.tierName(tier + 1) : null;
-  $('#lgTitle').textContent = `${League.tierName(tier)} · season ${league.season}`;
-  $('#lgSub').textContent = leagueOver ? `${done ? 'Season complete' : 'League games complete; the cup final is still to come'}. First to ${League.leagueTarget()}.`
-    : `Round ${league.round + 1} of ${league.schedule.length} · first to ${League.leagueTarget()}. `
-      + [above && `Top ${League.UP} go up to the ${above}`, below && `bottom ${League.DOWN} go down to the ${below}`].filter(Boolean).join(', ') + '.';
+  const c = solo(), tier = Career.tierOf(c, YOU);
+  const leagueOver = Career.leagueDone(c), done = Career.seasonOver(c), next = League.nextEvent();
+  const above = tier > 0 ? Career.tierName(tier - 1) : null, below = tier < Career.BOTTOM ? Career.tierName(tier + 1) : null;
+  $('#lgTitle').textContent = `${Career.tierName(tier)} · season ${c.season}`;
+  $('#lgSub').textContent = leagueOver ? `${done ? 'Season complete' : 'League games complete; the cup final is still to come'}. First to ${c.target}.`
+    : `Round ${c.round + 1} of ${Career.leagueRounds()} · first to ${c.target}. `
+      + [above && `Top ${Career.UP} go up to the ${above}`, below && `bottom ${Career.DOWN} go down to the ${below}`].filter(Boolean).join(', ') + '.';
   // Start of a season: what happened at the end of the last one
-  const moves = summary && league.round === 0 && !lastRound;
+  const sm = c.summary, moves = sm && c.round === 0 && !c.lastLeague;
   $('#lgMovesWrap').hidden = !moves;
   if (moves) {
-    const line = (t, dir) => summary.moves.filter(m => m.to === t && (dir === 'up' ? m.from > t : m.from < t));
-    $('#lgMoves').innerHTML = [0, 1, 2].flatMap(t => [
-      line(t, 'up').length ? `<div>Up to the ${League.tierName(t)}: ${line(t, 'up').map(m => who(m)).join(', ')}</div>` : '',
-      line(t, 'down').length ? `<div>Down to the ${League.tierName(t)}: ${line(t, 'down').map(m => who(m)).join(', ')}</div>` : '',
-    ]).join('') + `<div class="champs">Champions: ${summary.champions.map((n, t) => `${League.tierName(t)} <b>${esc(n)}</b>`).join(' · ')}${summary.cup ? ` · Cup <b>${esc(summary.cup.winner)}</b>` : ''}</div>`;
+    const line = (t, dir) => sm.moves.filter(m => m.id !== YOU && m.to === t && (dir === 'up' ? m.from > t : m.from < t));
+    $('#lgMoves').innerHTML = c.tiers.map((_, t) => t).flatMap(t => [
+      line(t, 'up').length ? `<div>Up to the ${Career.tierName(t)}: ${line(t, 'up').map(m => who(m.id)).join(', ')}</div>` : '',
+      line(t, 'down').length ? `<div>Down to the ${Career.tierName(t)}: ${line(t, 'down').map(m => who(m.id)).join(', ')}</div>` : '',
+    ]).join('') + `<div class="champs">Champions: ${sm.champions.map((id, t) => `${Career.tierName(t)} <b>${esc(nameOf(id))}</b>`).join(' · ')}${sm.cup ? ` · Cup <b>${esc(nameOf(sm.cup))}</b>` : ''}</div>`;
   }
-  $('#lgResultsWrap').hidden = !lastRound;
-  if (lastRound) {
-    $('#lgResultsLabel').textContent = `Round ${lastRound.round} results`;
-    $('#lgResults').innerHTML = lastRound.games.map(g => {
-      const A = league.entries[g.a], B = league.entries[g.b];
-      return `<div><span>${g.aw ? `<b>${who(A)}</b>` : who(A)}</span><span>${g.sa}–${g.sb}</span><span style="text-align:right">${g.aw ? who(B) : `<b>${who(B)}</b>`}</span></div>`;
-    }).join('');
+  // Your league's last round
+  const last = c.lastLeague;
+  $('#lgResultsWrap').hidden = !last;
+  if (last) {
+    $('#lgResultsLabel').textContent = `Round ${last.round} results`;
+    $('#lgResults').innerHTML = last.games.filter(g => g.tier === tier).map(g =>
+      `<div><span>${g.aWon ? `<b>${who(g.a)}</b>` : who(g.a)}</span><span>${g.sa}–${g.sb}</span><span style="text-align:right">${g.aWon ? who(g.b) : `<b>${who(g.b)}</b>`}</span></div>`).join('');
   }
+  const table = Career.standings(c, tier);
   $('#lgTable').innerHTML = '<tr><th>#</th><th>Player</th><th>P</th><th>W</th><th>L</th><th>+/−</th></tr>' +
-    League.standings().map(({ e }, pos) => `<tr class="${e.human ? 'me' : ''} ${League.zone(pos)}"><td>${pos + 1}</td><td>${who(e)}${e.human ? '' : `<span class="skill" title="Skill">${dots(e.skill)}</span>`}</td>
+    table.map((e, pos) => `<tr class="${e.id === YOU ? 'me' : ''} ${Career.zone(c, tier, pos)}"><td>${pos + 1}</td><td>${who(e.id)}${e.id === YOU ? '' : `<span class="skill" title="Skill">${dots(Career.entryFor(e.id).skill)}</span>`}</td>
       <td>${e.P}</td><td>${e.W}</td><td>${e.L}</td><td>${e.PF - e.PA > 0 ? '+' : ''}${e.PF - e.PA}</td></tr>`).join('');
   $('#lgKey').innerHTML = [above && '<span class="up">Promotion</span>', below && '<span class="down">Relegation</span>'].filter(Boolean).join('');
   renderCup();
-  if (next === 'cup') {
-    // Your cup tie comes before the next league round
-    const t = League.myCupTie(), opp = League.entryFor(t.a === League.YOU ? t.b : t.a), b = botById(opp.bot);
-    $('#lgNext').innerHTML = `<div class="opp">${faceSVG(opp.bot, 44)}<div>Cup · ${League.CUP_ROUNDS[League.lg.cup.round]}: <b>You</b> vs <b>${esc(opp.name)}</b> <span class="skill">${dots(opp.skill)}</span>
-      <div class="style">“${esc(b.style)}”</div></div></div>`;
-    $('#lgPlay').textContent = 'Play cup tie';
-  } else if (done) {
-    const table = League.standings(), pos = table.findIndex(x => x.e.human), champ = table[0].e, z = League.zone(pos);
-    $('#lgNext').innerHTML = (champ.human ? `<b>Champions of the ${League.tierName(tier)}!</b> ` : `${who(champ)} wins the ${League.tierName(tier)}. You finished ${ordinal(pos + 1)}. `)
-      + (z === 'up' ? `You’re promoted to the <b>${above}</b>.` : z === 'down' ? `You’re relegated to the <b>${below}</b>.` : tier === 0 && champ.human ? 'The best there is.' : `You stay in the ${League.tierName(tier)}.`)
-      + (League.lg.cup.winner === League.YOU ? ' <b>And you won the cup!</b>' : '');
+  if (done) {
+    const pos = table.findIndex(e => e.id === YOU), champ = table[0].id, z = Career.zone(c, tier, pos);
+    $('#lgNext').innerHTML = (champ === YOU ? `<b>Champions of the ${Career.tierName(tier)}!</b> ` : `${who(champ)} wins the ${Career.tierName(tier)}. You finished ${ordinal(pos + 1)}. `)
+      + (z === 'up' ? `You’re promoted to the <b>${above}</b>.` : z === 'down' ? `You’re relegated to the <b>${below}</b>.` : tier === 0 && champ === YOU ? 'The best there is.' : `You stay in the ${Career.tierName(tier)}.`)
+      + (c.cup.winner === YOU ? ' <b>And you won the cup!</b>' : '');
     $('#lgPlay').textContent = 'Next season';
   } else {
-    const opp = league.entries[League.myOpponent()], b = botById(opp.bot);
-    $('#lgNext').innerHTML = `<div class="opp">${faceSVG(opp.bot, 44)}<div>Next: <b>You</b> vs <b>${esc(opp.name)}</b> <span class="skill">${dots(opp.skill)}</span>
+    // Your next game: a cup tie, or the next league round
+    const opp = League.opponentOf(League.myFixture()), b = botById(opp), e = Career.entryFor(opp);
+    const what = next === 'cup' ? `Cup · ${Career.CUP_ROUNDS[c.cup.round]}:` : 'Next:';
+    $('#lgNext').innerHTML = `<div class="opp">${faceSVG(opp, 44)}<div>${what} <b>You</b> vs <b>${esc(e.name)}</b> <span class="skill">${dots(e.skill)}</span>
       <div class="style">“${esc(b.style)}”</div></div></div>`;
-    $('#lgPlay').textContent = 'Play match';
+    $('#lgPlay').textContent = next === 'cup' ? 'Play cup tie' : 'Play match';
   }
-  showMilkKing($('#lgKing'), done && tier === 0 && League.standings()[0].e.human); // only for winning the Premier League
+  showMilkKing($('#lgKing'), done && tier === 0 && table[0].id === YOU); // only for winning the Premier League
 }
 // The cup: how you're getting on, and the last round's results
 function renderCup() {
-  const cup = League.lg.cup, R = League.CUP_ROUNDS, you = League.YOU;
-  const name = id => id === you ? '<b>You</b>' : who(League.entryFor(id));
+  const c = solo(), cup = c.cup, R = Career.CUP_ROUNDS, st = Career.cupStatus(c, YOU);
   let status;
-  if (cup.winner === you) status = '<b>You won the cup!</b>';
-  else if (cup.out) status = `You were knocked out in the ${R[cup.out.round].toLowerCase()} by ${name(cup.out.by)}.`;
+  if (st.won) status = '<b>You won the cup!</b>';
+  else if (st.out) status = `You were knocked out in the ${R[st.out.round].toLowerCase()} by ${who(st.out.by)}.`;
   else if (cup.winner) status = '';
-  else if (cup.round === 0 && cup.byes.includes(you)) status = 'Premier League players get a bye to the second round.';
+  else if (st.bye) status = 'Premier League players get a bye to the second round.';
   else if (cup.round === 0) status = 'You’re in the first round. The Premier League joins in the second.';
   else status = `You’re through to the ${cup.round === R.length - 1 ? 'final' : R[cup.round].toLowerCase()}!`;
-  $('#lgCupLabel').textContent = cup.winner ? `Cup · won by ${League.cupName(cup.winner)}` : `Cup · ${R[cup.round].toLowerCase()} next`;
+  $('#lgCupLabel').textContent = cup.winner ? `Cup · won by ${nameOf(cup.winner)}` : `Cup · ${R[cup.round].toLowerCase()} next`;
   $('#lgCupStatus').innerHTML = status;
   const last = cup.round > 0 ? cup.ties[cup.round - 1] : null;
   $('#lgCupResultsLabel').textContent = last ? `${R[cup.round - 1]} results` : '';
   $('#lgCupResults').innerHTML = last ? last.map(t => {
     const aw = t.w === t.a;
-    return `<div><span>${aw ? `<b>${name(t.a)}</b>` : name(t.a)}</span><span>${t.sa}–${t.sb}</span><span style="text-align:right">${aw ? name(t.b) : `<b>${name(t.b)}</b>`}</span></div>`;
+    return `<div><span>${aw ? `<b>${who(t.a)}</b>` : who(t.a)}</span><span>${t.sa}–${t.sb}</span><span style="text-align:right">${aw ? who(t.b) : `<b>${who(t.b)}</b>`}</span></div>`;
   }).join('') : '';
 }
 function openLeague() {
-  if (!League.lg.league) return openNewLeague();
+  if (!solo()) return openNewLeague();
   ['#setup', '#over', '#lgNew'].forEach(s => $(s).hidden = true);
   state = 'menu'; renderLeague(); $('#league').hidden = false;
 }
-// Starting a league career: choose how long each game is (first to 20, 30 or 50)
+// Starting a career: choose how long each game is (first to 20, 30 or 50)
 const LENGTH_NOTE = { 20: 'Quick games: first to exactly 20. A season goes by fast.', 30: 'Standard games: first to exactly 30.', 50: 'Full games: first to exactly 50, the official length.' };
 let newLength = 30;
 function setLength(t) {
@@ -337,48 +337,43 @@ function openNewLeague() {
   state = 'menu'; $('#lgNew').hidden = false;
 }
 function playLeagueMatch() {
-  const { league } = League.lg;
-  if (League.seasonDone()) {
+  const c = solo();
+  if (Career.seasonOver(c)) {
     League.nextSeason();
-    const sm = League.lg.summary;
+    const sm = c.summary.people[YOU];
     if (sm.promoted) Achv.unlock('goingUp');
     if (sm.inARow) Achv.unlock('backToBack');
     renderLeague(); return;
   }
-  if (League.nextEvent() === 'cup') {
-    const t = League.myCupTie(), opp = League.entryFor(t.a === League.YOU ? t.b : t.a);
-    mode = 'league'; leagueMatch = { cup: true }; game.target = League.leagueTarget();
-    game.players = [newPlayer('You', null, COLORS[0]), { ...newPlayer(opp.name, opp.ai, COLORS[1]), bot: opp.bot }];
-    return launch(Math.random() < 0.5 ? 0 : 1); // a coin toss for who throws first
-  }
-  const oi = League.myOpponent(), opp = league.entries[oi];
-  mode = 'league'; leagueMatch = { oi, round: league.round }; game.target = League.leagueTarget();
+  const f = League.myFixture(), opp = Career.entryFor(League.opponentOf(f));
+  mode = 'league'; leagueMatch = { cup: f.kind === 'cup' }; game.target = c.target;
   game.players = [newPlayer('You', null, COLORS[0]), { ...newPlayer(opp.name, opp.ai, COLORS[1]), bot: opp.bot }];
-  launch(league.round % 2); // alternate who throws first
+  // League games alternate who throws first; cup ties are a coin toss
+  launch(f.kind === 'cup' ? (Math.random() < 0.5 ? 0 : 1) : c.round % 2);
 }
 function finishLeagueMatch() {
-  const [me, bot] = game.players, won = game.winner === me, { league, cup } = League.lg;
+  const [me, bot] = game.players, won = game.winner === me, c = solo(), tier = Career.tierOf(c, YOU);
   if (leagueMatch.cup) {
     // Giant Killer: knocking a Premier League player (they had a bye) out of the cup from the Sunday League
-    if (won && league.tier === 2 && cup.byes.includes(bot.bot)) Achv.unlock('giantKiller');
+    if (won && tier === Career.BOTTOM && c.cup.byes.includes(bot.bot)) Achv.unlock('giantKiller');
     // Underdogs: beating anyone from a league above yours
-    if (won && League.tierOf(bot.bot) < league.tier) Achv.unlock('underdogs');
-    League.finishCupTie(me.score, bot.score, won);
-  } else League.finishRound(leagueMatch.oi, me.score, bot.score, won);
+    if (won && Career.tierOf(c, bot.bot) < tier) Achv.unlock('underdogs');
+  }
+  League.record(me.score, bot.score, won);
   leagueMatch = null; mode = 'quick';
   careerAchievements();
 }
 // Season milestones (cup ties between bots can decide some of these, so check after every match)
 function careerAchievements() {
-  const { league, cup } = League.lg, cupWon = cup.winner === League.YOU;
+  const c = solo(), tier = Career.tierOf(c, YOU), cupWon = c.cup.winner === YOU;
   if (cupWon) Achv.unlock('cupWinner');
-  if (!League.leagueDone()) return;
-  const table = League.standings(), top = table[0].e.human, me = table.find(x => x.e.human).e;
-  if (me.W === league.schedule.length) Achv.unlock('invincible');
-  if (top && league.tier === 0) Achv.unlock('milkKing');
+  if (!Career.leagueDone(c)) return;
+  const table = Career.standings(c, tier), top = table[0].id === YOU, mine = table.find(e => e.id === YOU);
+  if (mine.W === Career.leagueRounds()) Achv.unlock('invincible');
+  if (top && tier === 0) Achv.unlock('milkKing');
   if (top && cupWon) Achv.unlock('double');
 }
-League.loadLeague();
+League.load();
 
 // ---------- Online play ----------
 // The server owns the game. Messages that change the scene wait in a queue while a throw is being
@@ -1276,11 +1271,11 @@ $('#againBtn').onclick = () => {
 $('#leagueBtn').onclick = openLeague;
 $('#lgPlay').onclick = playLeagueMatch;
 $('#lgMenu').onclick = () => { $('#league').hidden = true; $('#setup').hidden = false; };
-$('#lgReset').onclick = () => { if (confirm('Start a new league from the Sunday League? Your career so far will be lost.')) openNewLeague(); };
+$('#lgReset').onclick = () => { if (confirm('Start a new career from the Sunday League? Your career so far will be lost.')) openNewLeague(); };
 $('#lgLength').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setLength(+b.dataset.t); });
 $('#lgCreate').onclick = () => { League.newCareer(newLength); openLeague(); };
 // Back: to the league you have (choosing Start over doesn't lose it until you start the new one), or the menu
-$('#lgNewBack').onclick = () => { if (League.lg.league) openLeague(); else { $('#lgNew').hidden = true; $('#setup').hidden = false; } };
+$('#lgNewBack').onclick = () => { if (solo()) openLeague(); else { $('#lgNew').hidden = true; $('#setup').hidden = false; } };
 $('#onlineBtn').onclick = () => openOnline();
 
 // ---------- Achievements ----------

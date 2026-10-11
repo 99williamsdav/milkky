@@ -7,7 +7,7 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="description" content="Knock the numbered bottles and hit the target score exactly. Play in your browser on your own, in a league, or online with friends.">
+<meta name="description" content="Knock the numbered bottles and hit the target score exactly. Play in your browser on your own, in a career, or online with friends.">
 <!-- Link previews (WhatsApp, iMessage, Slack...). Crawlers don't run scripts and need a full image URL. -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Milkky">
@@ -311,7 +311,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <button data-n="1">1</button><button data-n="2" aria-pressed="true">2</button><button data-n="3">3</button><button data-n="4">4</button>
       </div>
       <div id="slots"></div>
-      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">League</button><button id="trainBtn">Training</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="setupRules">Rules</button></div>
+      <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">Career Mode</button><button id="trainBtn">Training</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="setupRules">Rules</button></div>
       <button class="achbtn" id="achBtn">Achievements</button>
     </div>
   </div>
@@ -369,19 +369,19 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 
   <div class="overlay" id="lgNew" hidden>
     <div class="card">
-      <h2>New league</h2>
+      <h2>New career</h2>
       <p class="sub">Start in the Sunday League and work your way up to the Premier League. Each season the top 2 go up and the bottom 2 go down.</p>
       <div style="font-weight:600">Game length</div>
       <div class="count" id="lgLength"><button data-t="20">20<small>Quick</small></button><button data-t="30">30<small>Standard</small></button><button data-t="50">50<small>Full</small></button></div>
       <p class="note" id="lgLengthNote"></p>
-      <div class="row"><button class="primary" id="lgCreate">Start league</button><button id="lgNewBack">Back</button></div>
+      <div class="row"><button class="primary" id="lgCreate">Start career</button><button id="lgNewBack">Back</button></div>
     </div>
   </div>
 
   <div class="overlay" id="league" hidden>
     <div class="king" id="lgKing" hidden></div>
     <div class="card wide">
-      <h2 id="lgTitle">League</h2>
+      <h2 id="lgTitle">Career Mode</h2>
       <p class="sub" id="lgSub"></p>
       <div id="lgMovesWrap"><div class="sectionlabel">Last season</div><div id="lgMoves"></div></div>
       <div id="lgResultsWrap"><div class="sectionlabel" id="lgResultsLabel"></div><div id="lgResults"></div></div>
