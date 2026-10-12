@@ -1113,7 +1113,9 @@ function startTraining(kind) {
   mode = 'training'; leagueMatch = null; cpu = null; tween = null; physicsOn = true;
   ['#setup', '#over', '#league', '#trainOver', '#trainMenu'].forEach(s => $(s).hidden = true);
   physics.removeStick(); clearMilk(bottles); bottlesAway(true);
-  training = { kind, throws: [], target: V(0, 0, 0), land: null };
+  let best = 0; // your personal best in this mode, shown while you play
+  try { best = +localStorage.getItem(TRAINING[kind].best) || 0; } catch (e) {}
+  training = { kind, throws: [], target: V(0, 0, 0), land: null, best };
   nextTarget();
 }
 function nextTarget() {
@@ -1142,10 +1144,17 @@ function nextTarget() {
   throwTip();
 }
 function renderTraining() {
-  const n = training.throws.length, kind = training.kind;
+  const n = training.throws.length, kind = training.kind, total = trainTotal(), best = training.best;
+  // Beside your score: the personal best to beat, and how far off it you are
+  const perThrow = kind === 'strike' ? 12 : 10, need = best - total + 1;
+  const chase = !best ? 'Set one this round' : total > best ? 'New best!'
+    : need <= (TRAIN_THROWS - n) * perThrow ? `${need} more to beat it` : 'Out of reach this time';
   $('#board').innerHTML = `<div class="chip active"><div class="nm">${TRAINING[kind].name}</div>
-    <div class="sc">${trainTotal()}<small> ${kind !== 'strike' ? 'pts' : trainTotal() === 1 ? 'bottle' : 'bottles'}</small></div>
-    <div class="tsub">Throw ${Math.min(n + 1, TRAIN_THROWS)} of ${TRAIN_THROWS}</div></div>`;
+    <div class="sc">${total}<small> ${kind !== 'strike' ? 'pts' : total === 1 ? 'bottle' : 'bottles'}</small></div>
+    <div class="tsub">Throw ${Math.min(n + 1, TRAIN_THROWS)} of ${TRAIN_THROWS}</div></div>
+    <div class="chip"><div class="nm">Personal best</div>
+    <div class="sc">${best || '–'}<small> / ${trainMax(kind)}</small></div>
+    <div class="tsub">${chase}</div></div>`;
 }
 // The stick has come to rest: score the throw
 function resolveTraining() {
