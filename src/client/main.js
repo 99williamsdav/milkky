@@ -15,6 +15,7 @@ import { faceSVG } from './faces.js';
 import * as Achv from './achievements.js';
 import * as Push from './push.js';
 import { wormHTML } from './worm.js';
+import * as Stats from './careerstats.js';
 import { botById } from '../shared/roster.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey, serverOverride } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
@@ -210,6 +211,7 @@ function resolveThrow() {
   const thrower = game.cur, before = game.players[thrower], scoreBefore = before.score, missesBefore = before.misses;
   const msg = scoreThrow(game, fallen.map(p => p.num));
   game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]); // for the worm
+  if (mode === 'league' && careerTally && thrower === 0) Stats.recordThrow(careerTally, fallen.map(p => p.num), scoreBefore, game.target);
   Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, needle: physics.needle, before: throwFrom || {}, release: RELEASE,
     target: game.target, players: game.players, scoreBefore, missesBefore,
     winner: game.winner ? game.players.indexOf(game.winner) : -1, over: isGameOver(game) });
@@ -347,17 +349,22 @@ function openNewLeague() {
   setLength(chosenTarget in LENGTH_NOTE ? chosenTarget : 30);
   state = 'menu'; $('#lgNew').hidden = false;
 }
+// Career stats: kept in the career's save (started now for a career from before they existed), and this game's
+// tally of your throws
+let careerTally = null;
+const careerStats = () => (solo().stats ||= Stats.emptyStats(solo().season, Career.tierOf(solo(), YOU)));
 function playLeagueMatch() {
   const c = solo();
   if (Career.seasonOver(c)) {
     League.nextSeason();
     const sm = c.summary.people[YOU];
+    Stats.recordSeason(careerStats(), sm); League.save();
     if (sm.promoted) Achv.unlock('goingUp');
     if (sm.inARow) Achv.unlock('backToBack');
     renderLeague(); return;
   }
   const f = League.myFixture(), opp = Career.entryFor(League.opponentOf(f));
-  mode = 'league'; leagueMatch = { cup: f.kind === 'cup' }; game.target = c.target;
+  mode = 'league'; leagueMatch = { cup: f.kind === 'cup' }; game.target = c.target; careerTally = Stats.newTally();
   game.players = [newPlayer('You', null, COLORS[0]), { ...newPlayer(opp.name, opp.ai, COLORS[1]), bot: opp.bot }];
   // League games alternate who throws first; cup ties are a coin toss
   launch(f.kind === 'cup' ? (Math.random() < 0.5 ? 0 : 1) : c.round % 2);
@@ -370,8 +377,9 @@ function finishLeagueMatch() {
     // Underdogs: beating anyone from a league above yours
     if (won && Career.tierOf(c, bot.bot) < tier) Achv.unlock('underdogs');
   }
-  League.record(me.score, bot.score, won);
-  leagueMatch = null; mode = 'quick';
+  if (careerTally) Stats.recordGame(careerStats(), careerTally, { won, cup: leagueMatch.cup, opp: bot.bot, youOut: me.out, theyOut: bot.out });
+  League.record(me.score, bot.score, won); // (saves the career, stats included)
+  leagueMatch = null; mode = 'quick'; careerTally = null;
   careerAchievements();
 }
 // Season milestones (cup ties between bots can decide some of these, so check after every match)
@@ -1408,6 +1416,13 @@ $('#againBtn').onclick = () => {
 $('#leagueBtn').onclick = openLeague;
 $('#lgPlay').onclick = playLeagueMatch;
 $('#lgMenu').onclick = () => { $('#league').hidden = true; $('#setup').hidden = false; };
+$('#lgStats').onclick = () => {
+  const s = solo().stats;
+  $('#csSub').textContent = s?.games ? `Your career${s.since > 1 ? ` since season ${s.since}` : ''}: ${s.games} game${s.games > 1 ? 's' : ''} over ${solo().season - s.since + 1} season${solo().season - s.since ? 's' : ''}.` : '';
+  $('#csBody').innerHTML = Stats.renderStats(s);
+  $('#league').hidden = true; $('#careerStats').hidden = false;
+};
+$('#csBack').onclick = () => { $('#careerStats').hidden = true; $('#league').hidden = false; };
 $('#lgReset').onclick = () => { if (confirm('Start a new career from the Sunday League? Your career so far will be lost.')) openNewLeague(); };
 $('#lgLength').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setLength(+b.dataset.t); });
 $('#lgCreate').onclick = () => { League.newCareer(newLength); openLeague(); };
