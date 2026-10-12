@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node test/career.mjs && node test/careerroom.mjs && node test/push.mjs && node test/play.mjs && node test/standin.mjs && node test/league.mjs && node test/restart.mjs && node test/async.mjs"
+    "test": "node test/career.mjs && node test/careerroom.mjs && node test/push.mjs && node test/play.mjs && node test/standin.mjs && node test/league.mjs && node test/restart.mjs && node test/async.mjs && node test/robust.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.14.0",

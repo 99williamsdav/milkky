@@ -1,6 +1,6 @@
 name: Deploy
 
-# Every push to main (touching the game) -> new release folder, staging points at it.
+# Every push to main (touching the game) -> the server tests run, then a new release folder, staging points at it.
 # The "production" job then waits for approval; approving it points production
 # at the exact same release. To roll back, open an older run and re-run its
 # "Promote to production" job.
@@ -22,8 +22,24 @@ env:
   RELEASE: ${{ github.sha }}
 
 jobs:
+  test:
+    name: Server tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: server
+      - run: npm test
+        working-directory: server
+
   staging:
     name: Deploy to staging
+    needs: test
     runs-on: ubuntu-latest
     environment:
       name: staging
@@ -84,7 +100,7 @@ jobs:
         run: |
           ssh "$TARGET" "cd $BASE && test -d releases/$RELEASE && ln -sfn releases/$RELEASE production.tmp && mv -Tf production.tmp production"
 
-      # Note: restarting ends any online games in progress.
+      # Games are saved and picked up again after the restart (live players get a short grace period to reconnect).
       - name: Restart production game server
         run: |
           ssh "$TARGET" "sudo systemctl restart milkky-server@production"

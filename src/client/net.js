@@ -5,11 +5,12 @@
 const SESSION_KEY = 'milkky-online';
 const PLAYER_KEY = 'milkky-me';
 
-// Same host as the page (nginx forwards /ws). For local testing: ?server=ws://localhost:8080/ws
+// Same host as the page (nginx forwards /ws). For local testing: ?server=ws://localhost:8080/ws, honoured only when
+// the page itself is served locally. (Anywhere else it would hand your player key to whoever's server a link names.)
+const LOCAL_PAGE = /^(localhost|127\.0\.0\.1|\[::1\])$|\.localhost$/.test(location.hostname);
+export const serverOverride = () => (LOCAL_PAGE && new URLSearchParams(location.search).get('server')) || null;
 export function serverUrl() {
-  const override = new URLSearchParams(location.search).get('server');
-  if (override) return override;
-  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  return serverOverride() || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 }
 
 function loadSession() { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch (e) { return null; } }

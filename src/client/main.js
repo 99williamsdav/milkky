@@ -15,7 +15,7 @@ import { faceSVG } from './faces.js';
 import * as Achv from './achievements.js';
 import * as Push from './push.js';
 import { botById } from '../shared/roster.js';
-import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey } from './net.js';
+import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey, serverOverride } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
 import { renderCareerHub, careerAchievements as careerAchievementsOnline } from './careerhub.js';
 
@@ -428,7 +428,7 @@ function setRoomParam(code) {
 // Invites go through /join, /joinleague or /joincareer (join.html and so on, mapped in nginx).
 // Each has its own link preview, then forwards to the game.
 function shareLink(code) {
-  const here = new URL(location.href), server = here.searchParams.get('server');
+  const here = new URL(location.href), server = serverOverride();
   const mode = online?.room?.mode;
   const u = new URL(mode === 'career' ? 'joincareer' : mode === 'league' ? 'joinleague' : 'join', here);
   u.searchParams.set('room', code);

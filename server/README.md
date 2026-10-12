@@ -16,13 +16,19 @@ It imports the game code from `../src/shared/`, so deploy it alongside `src/`.
 ```
 npm install
 npm start          # PORT (default 8080), HOST (default 127.0.0.1)
-npm test           # career rules, an online career, push notifications, single game, stand-ins, live league, restarting mid-game, and an async league
+npm test           # career rules, an online career, push notifications, single game, stand-ins, live league, restarting mid-game, an async league, and robustness
 ```
 
 `GET /health` → `ok <n> rooms`. WebSocket at `/ws`. All messages are JSON with a `t` field.
 
 Games are saved to disk (one JSON file per room) and picked up again after a restart or deploy. The folder is
 `MILKKY_DATA_DIR`, else systemd's `STATE_DIRECTORY` (see `deploy/milkky-server@.service`), else `server/data`.
+If a room throws while carrying on by itself (a timer: a computer's throw, the next round), it is closed and its
+save renamed to `CODE.json.bad`, so one broken room can't take the server down (or keep doing so after each restart).
+
+Limits: each connection may send 20 messages a second (bursts of 60; the rest are dropped), and one address can have
+`MILKKY_ROOMS_PER_ADDRESS` (20) rooms it created open at once (behind nginx, the address is the last `X-Forwarded-For`
+entry). A room is closed as soon as nobody has a seat in it.
 
 Settings for testing (environment): `MILKKY_ANIM_SCALE` (0 skips animation waits), `MILKKY_TURN_SECONDS` (45),
 `MILKKY_AWAY_SECONDS` (10), `MILKKY_BETWEEN_SECONDS` (20, between live league rounds), `MILKKY_ASYNC_BETWEEN_SECONDS`

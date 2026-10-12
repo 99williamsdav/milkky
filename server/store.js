@@ -32,11 +32,17 @@ export function remove(code) {
   pending.delete(code);
   try { fs.unlinkSync(file(code)); } catch {}
 }
-// Everything saved, as plain data (unreadable files are skipped and reported)
+// A room that broke: its save is kept to look at (CODE.json.bad) but never loaded again
+export function quarantine(code) {
+  pending.delete(code);
+  try { fs.renameSync(file(code), file(code) + '.bad'); } catch {}
+}
+// Everything saved: [{ code, data }] (unreadable files are reported and set aside)
 export function loadAll() {
   return fs.readdirSync(DIR).filter(f => f.endsWith('.json')).map(f => {
-    try { return JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8')); }
-    catch (err) { console.error('could not load', f, err.message); return null; }
+    const code = f.slice(0, -'.json'.length);
+    try { return { code, data: JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8')) }; }
+    catch (err) { console.error('could not load', f, err.message); quarantine(code); return null; }
   }).filter(Boolean);
 }
 export const dataDir = ROOT;

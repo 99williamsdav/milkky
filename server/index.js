@@ -1,6 +1,7 @@
 // Milkky game server. WebSocket on /ws, health check on /health.
 // Meant to sit behind nginx: listens on 127.0.0.1 unless HOST says otherwise.
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import RAPIER_MOD from '@dimforge/rapier3d-compat';
 import { Room, hashKey } from './room.js';
@@ -10,9 +11,12 @@ import * as push from './push.js';
 const RAPIER = RAPIER_MOD.default || RAPIER_MOD;
 await RAPIER.init();
 
+const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[name] : fallback);
 const PORT = +process.env.PORT || 8080, HOST = process.env.HOST || '127.0.0.1';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O
 const MAX_ROOMS = 500;
+const ROOMS_PER_ADDRESS = env('MILKKY_ROOMS_PER_ADDRESS', 20); // rooms created from one address that can be open at once
+const MSG_RATE = 20, MSG_BURST = 60;             // messages per second per connection, and the burst allowed above that
 const EMPTY_ROOM_TTL = 2 * 60 * 1000;            // live: close a room this long after the last person leaves
 const ASYNC_IDLE_TTL = 14 * 24 * 3600 * 1000;    // async: close a finished (or never started) room after two quiet weeks
 
@@ -25,10 +29,39 @@ function newCode() {
 }
 const findRoom = code => rooms.get(String(code ?? '').toUpperCase().trim());
 
+// Take a room away. A room that broke (`failed`) keeps its save for a look, but it isn't loaded again.
+function closeRoom(room, { failed = false } = {}) {
+  room.dispose();
+  if (rooms.get(room.code) === room) rooms.delete(room.code);
+  for (const ws of wss.clients) if (ws.room === room) ws.room = ws.seat = null;
+  if (failed) store.quarantine(room.code); else store.remove(room.code);
+}
+Room.onFail = room => closeRoom(room, { failed: true });
+// Nobody has a seat any more (everyone left the lobby): no reason to keep it
+const closeIfEmpty = room => { if (room && !room.hasPeople && rooms.get(room.code) === room) closeRoom(room); };
+
 // Pick up where we left off before the last restart or deploy
-for (const d of store.loadAll()) {
-  try { rooms.set(d.code, Room.restore(d, RAPIER)); }
-  catch (err) { console.error('could not restore room', d.code, err); }
+for (const { code, data } of store.loadAll()) {
+  try { rooms.set(code, Room.restore(data, RAPIER)); }
+  catch (err) { console.error('could not restore room', code, err); store.quarantine(code); }
+}
+
+// Where a connection comes from. Behind nginx (connecting from this machine) that's the last address in
+// X-Forwarded-For, which nginx adds; only a hash is kept.
+function originOf(req) {
+  const peer = req.socket.remoteAddress || '';
+  const local = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+  return createHash('sha256').update(local && forwarded.length ? forwarded.at(-1) : peer).digest('hex').slice(0, 16);
+}
+// Token bucket: MSG_RATE a second on average, up to MSG_BURST at once. Messages over the limit are dropped.
+function allowed(ws) {
+  const now = Date.now();
+  ws.tokens = Math.min(MSG_BURST, ws.tokens + (now - ws.refilled) * MSG_RATE / 1000);
+  ws.refilled = now;
+  if (ws.tokens < 1) return false;
+  ws.tokens--;
+  return true;
 }
 
 const server = http.createServer((req, res) => {
@@ -51,6 +84,7 @@ function abandon(prev, ws) {
   if (!seat || room.async) return; // async seats are kept: people can be in several of those at once
   if (seat.ws && seat.ws !== ws) { seat.ws.room = seat.ws.seat = null; seat.ws.close(4001, 'Joined another room'); }
   room.disconnect(seat, { left: true });
+  closeIfEmpty(room);
 }
 
 function onMessage(ws, m) {
@@ -67,13 +101,21 @@ function onMessage(ws, m) {
   if (ws.room) {
     const { room, seat } = ws;
     // leave: give up the seat (the computer plays it from now on). detach: just step away (async), keeping it.
-    if (m.t === 'leave' || m.t === 'detach') { ws.room = ws.seat = null; return room.disconnect(seat, { left: m.t === 'leave' }); }
+    if (m.t === 'leave' || m.t === 'detach') {
+      ws.room = ws.seat = null;
+      room.disconnect(seat, { left: m.t === 'leave' });
+      return closeIfEmpty(room);
+    }
     return room.handle(seat, m);
   }
   switch (m.t) {
     case 'create': {
       if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'error', msg: 'The server is full, try again later' });
+      let mine = 0;
+      for (const r of rooms.values()) if (r.origin === ws.origin) mine++;
+      if (mine >= ROOMS_PER_ADDRESS) return send(ws, { t: 'error', msg: 'You have too many rooms open. Leave one, or join a friend’s instead.' });
       const room = new Room(newCode(), RAPIER);
+      room.origin = ws.origin;
       rooms.set(room.code, room);
       enter(ws, room, room.addHuman(ws, m.name, m.me));
       return abandon(m.leave, ws);
@@ -98,10 +140,13 @@ function onMessage(ws, m) {
   }
 }
 
-wss.on('connection', ws => {
+wss.on('connection', (ws, req) => {
   ws.alive = true;
+  ws.origin = originOf(req);
+  ws.tokens = MSG_BURST; ws.refilled = Date.now();
   ws.on('pong', () => { ws.alive = true; });
   ws.on('message', data => {
+    if (!allowed(ws)) return;
     let m;
     try { m = JSON.parse(data); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
@@ -110,16 +155,17 @@ wss.on('connection', ws => {
   ws.on('close', () => { if (ws.room && ws.seat.ws === ws) ws.room.disconnect(ws.seat); });
 });
 
-// Drop dead connections and close rooms nobody is in.
+// Drop dead connections and close rooms nobody is in (or nobody has a seat in any more).
 setInterval(() => {
   for (const ws of wss.clients) {
     if (!ws.alive) { ws.terminate(); continue; }
     ws.alive = false; ws.ping();
   }
   const now = Date.now();
-  for (const [code, room] of rooms) {
-    const idle = room.async ? !room.inProgress && now - room.updatedAt > ASYNC_IDLE_TTL : room.emptySince && now - room.emptySince > EMPTY_ROOM_TTL;
-    if (idle) { room.dispose(); rooms.delete(code); store.remove(code); }
+  for (const room of [...rooms.values()]) {
+    const idle = !room.hasPeople
+      || (room.async ? !room.inProgress && now - room.updatedAt > ASYNC_IDLE_TTL : room.emptySince && now - room.emptySince > EMPTY_ROOM_TTL);
+    if (idle) closeRoom(room);
   }
 }, 30_000).unref();
 

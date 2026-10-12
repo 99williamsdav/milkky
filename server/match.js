@@ -166,7 +166,7 @@ export class Match {
     let at = this.deadline;
     if (this.pace === 'live' && !seat.connected) at = Math.max(this.turnStart, Math.min(at, (seat.awaySince || Date.now()) + AWAY_GRACE));
     if (at == null) return;
-    this.timer = setTimeout(() => this.standIn(), Math.max(0, at - Date.now()));
+    this.timer = this.room.later(() => this.standIn(), at - Date.now());
   }
   // The computer throws for a person who ran out of time, isn't connected, or left.
   standIn() {
@@ -180,7 +180,7 @@ export class Match {
     this.deadline = null;
     this.turnInfo = { cur: i, cpu: { aim: plan.aim, target: plan.target }, ...(standIn ? { standIn: true } : {}) };
     this.send({ t: 'turn', ...this.turnInfo });
-    this.timer = setTimeout(() => this.doThrow(plan.thrownDist, plan.thrownAim), (delay + CPU_WINDUP * ANIM_SCALE) * 1000);
+    this.timer = this.room.later(() => this.doThrow(plan.thrownDist, plan.thrownAim), (delay + CPU_WINDUP * ANIM_SCALE) * 1000);
   }
   doThrow(dist, aim) {
     if (this.over) return;

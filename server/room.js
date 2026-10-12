@@ -62,6 +62,8 @@ export class Room {
     this.emptySince = null;
     this.updatedAt = Date.now();
     this.lastVisit = Date.now(); // when someone last came to the room (a career stops if nobody does for a long time)
+    this.origin = null;     // a hash of the address that created it (to limit rooms per address)
+    this.failed = false;    // something it did later threw: it's being closed
   }
 
   // ---------- Seats ----------
@@ -69,6 +71,8 @@ export class Room {
   // Live: the first person here. Async: the first person in the room, here or not (they'll be back).
   get host() { return this.seats.findIndex(s => !s.cpu && !s.left && (this.async || s.connected)); }
   get inProgress() { return this.phase === 'playing' || this.phase === 'between'; }
+  // Anyone (not a computer player) still has a seat, here or not
+  get hasPeople() { return this.seats.some(s => !s.cpu); }
   // A career takes people at any time (they wait for the next season)
   canJoin() { return (!this.inProgress || this.mode === 'career') && this.seats.length < MAX_SEATS[this.mode]; }
   uniqueName(name) {
@@ -129,10 +133,14 @@ export class Room {
     } else if (left) {
       this.removeSeat(seat);
     } else if (!this.async) { // e.g. a page refresh in a live lobby (async lobbies keep their seats)
-      seat.dropTimer = setTimeout(() => { if (!seat.connected && !this.inProgress) { this.removeSeat(seat); this.broadcastRoom(); } }, LOBBY_GRACE);
+      this.dropLater(seat);
     }
     if (!this.seats.some(s => !s.cpu && s.connected)) this.emptySince = Date.now();
     this.broadcastRoom();
+  }
+  // Live lobby: a disconnected person's seat is let go if they don't come back soon (e.g. from a refresh)
+  dropLater(seat) {
+    seat.dropTimer = this.later(() => { if (!seat.connected && !this.inProgress) { this.removeSeat(seat); this.broadcastRoom(); } }, LOBBY_GRACE);
   }
   removeSeat(seat) {
     clearTimeout(seat.dropTimer);
@@ -373,8 +381,8 @@ export class Room {
   armRoundDeadline(at) {
     this.roundEndsAt = at;
     clearTimeout(this.timer); clearTimeout(this.reminder);
-    this.timer = setTimeout(() => this.matches.forEach(m => m.finishWithBots()), Math.max(0, at - Date.now()));
-    if (at - REMIND_BEFORE > Date.now()) this.reminder = setTimeout(() => this.remindUnfinished(), at - REMIND_BEFORE - Date.now());
+    this.timer = this.later(() => this.matches.forEach(m => m.finishWithBots()), at - Date.now());
+    if (at - REMIND_BEFORE > Date.now()) this.reminder = this.later(() => this.remindUnfinished(), at - REMIND_BEFORE - Date.now());
   }
   remindUnfinished() {
     const h = Math.round(REMIND_BEFORE / 3600_000), mins = Math.max(1, Math.round(REMIND_BEFORE / 60_000));
@@ -426,7 +434,7 @@ export class Room {
       const pause = this.async ? ASYNC_BETWEEN_ROUNDS : BETWEEN_ROUNDS;
       this.phase = 'between';
       this.nextRoundAt = Date.now() + pause;
-      this.timer = setTimeout(() => this.startRound(), pause);
+      this.timer = this.later(() => this.startRound(), pause);
     }
     this.broadcastRoom();
   }
@@ -475,7 +483,7 @@ export class Room {
     const pause = Career.seasonOver(this.career) ? SEASON_BREAK : ASYNC_BETWEEN_ROUNDS;
     this.phase = 'between';
     this.nextRoundAt = Date.now() + pause;
-    this.timer = setTimeout(() => this.careerNext(), pause);
+    this.timer = this.later(() => this.careerNext(), pause);
     this.broadcastRoom();
   }
   // After the pause: the next step, or, at the end of a season, the next season. People who have left are
@@ -505,7 +513,7 @@ export class Room {
     const entryOf = seat => lg ? lg.entries.findIndex(e => e.seat === seat) : -1;
     const seatRef = seat => this.seats.includes(seat) ? { s: this.seatIndex(seat) } : seat.cpu === 'career' ? { bot: seat.bot } : { e: entryOf(seat) };
     return {
-      v: 1, code: this.code, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target,
+      v: 1, code: this.code, origin: this.origin, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target,
       nextRoundAt: this.nextRoundAt || null, roundEndsAt: this.roundEndsAt || null, updatedAt: this.updatedAt, lastVisit: this.lastVisit,
       seats: this.seats.map(s => ({ name: s.name, cpu: s.cpu, bot: s.bot || null, token: s.token, me: s.me || null, left: !!s.left, pid: s.pid || null })),
       career: this.career, stepResults: this.stepResults,
@@ -524,7 +532,7 @@ export class Room {
   static restore(d, RAPIER) {
     const room = new Room(d.code, RAPIER);
     const back = Date.now() + RESTART_GRACE;
-    Object.assign(room, { mode: d.mode, pace: d.pace || 'live', phase: d.phase, target: d.target, nextRoundAt: d.nextRoundAt,
+    Object.assign(room, { origin: d.origin || null, mode: d.mode, pace: d.pace || 'live', phase: d.phase, target: d.target, nextRoundAt: d.nextRoundAt,
       emptySince: Date.now(), updatedAt: d.updatedAt || Date.now(), lastVisit: d.lastVisit || Date.now(),
       career: d.career || null, stepResults: d.stepResults || {} });
     room.seats = d.seats.map(s => ({ ...s, ws: null, connected: !!s.cpu, awaySince: back }));
@@ -547,16 +555,30 @@ export class Room {
     room.matches.forEach(m => m.resume());
     room.restoring = false;
     if (room.phase === 'between') {
-      room.timer = setTimeout(() => (room.mode === 'career' ? room.careerNext() : room.startRound()), Math.max(0, d.nextRoundAt - Date.now()));
+      room.timer = room.later(() => (room.mode === 'career' ? room.careerNext() : room.startRound()), d.nextRoundAt - Date.now());
     }
     if (room.phase === 'playing' && d.roundEndsAt) room.armRoundDeadline(d.roundEndsAt);
     if (!room.inProgress && !room.async) {
-      for (const s of room.seats.filter(s => !s.cpu)) {
-        s.dropTimer = setTimeout(() => { if (!s.connected && !room.inProgress) { room.removeSeat(s); room.broadcastRoom(); } }, LOBBY_GRACE);
-      }
+      for (const s of room.seats.filter(s => !s.cpu)) room.dropLater(s);
     }
     return room;
   }
+
+  // ---------- Timers ----------
+  // Everything a room does later goes through here. If it throws, the room is closed (and its save set aside,
+  // see Room.onFail) rather than crashing the server, and crashing it again after every restart.
+  later(fn, ms) { return setTimeout(() => this.safely(fn), Math.max(0, ms)); }
+  safely(fn) {
+    if (this.failed) return;
+    try { fn(); } catch (err) {
+      this.failed = true;
+      console.error('room failed, closing it', this.code, err);
+      try { this.broadcast({ t: 'error', msg: 'Something went wrong with this game, so it has been closed', code: 'gone' }); } catch {}
+      Room.onFail(this);
+    }
+  }
+  // Set by the server: take a failed room away
+  static onFail = room => room.dispose();
 
   disposeMatches() { this.matches.forEach(m => m.dispose()); this.matches = []; }
   dispose() { clearTimeout(this.timer); clearTimeout(this.reminder); this.disposeMatches(); this.seats.forEach(s => clearTimeout(s.dropTimer)); }

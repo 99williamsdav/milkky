@@ -24,6 +24,7 @@ export const ACHIEVEMENTS = [
   { id: 'yoyo', group: 'Funny ones', name: 'Yo-Yo', desc: 'Go over the target three times in one game' },
   { id: 'soClose', group: 'Funny ones', name: 'So Close', desc: 'Lose a game when you needed just 1 point' },
   { id: 'jammyDodger', group: 'Funny ones', name: 'Jammy Dodger', desc: 'Finish a game on 0 points' },
+  { id: 'spiltMilk', group: 'Throwing', name: 'Spilt Milk', desc: 'Knock over 40 bottles in a single game' },
   { id: 'goingUp', group: 'Career', name: 'Going Up', desc: 'Win your first promotion' },
   { id: 'backToBack', group: 'Career', name: 'Back to Back', desc: 'Win promotion two seasons in a row' },
   { id: 'underdogs', group: 'Career', name: 'Underdogs', desc: 'Win a cup game against a player from a higher league' },
@@ -54,16 +55,17 @@ export function unlock(id) {
 }
 
 // ---------- During a game ----------
-// Per player: throws taken, whether they've missed, times gone over, whether they dropped to half,
-// and recent single-bottle scores (for Countdown). `throws` counts every throw in the game (for Back Row).
+// Per player: throws taken, bottles knocked over, whether they've missed, times gone over, whether they dropped
+// to half, and recent single-bottle scores (for Countdown). `throws` counts every throw in the game (for Back Row).
 let match = null;
 // mine[i]: whether player i is you
 export function gameStarted(mine, { midway = false } = {}) {
-  match = { throws: midway ? 1 : 0, players: mine.map(m => ({ mine: m, throws: 0, missed: false, overs: 0, halved: false, recent: [] })) };
+  match = { throws: midway ? 1 : 0, players: mine.map(m => ({ mine: m, throws: 0, knocked: 0, missed: false, overs: 0, halved: false, recent: [] })) };
 }
 
 const FRONT = [1, 2, 3, 10, 4], BACK = [7, 8, 9];
 const NEEDLE_GAP = 0.12; // metres between the two bottles' sides: about two sticks' width
+const SPILT_MILK = 40;    // bottles in one game: a long one (about 1 game in 50 to 50, playing like the bots)
 // A throw has been played and scored. t: {
 //   who: thrower's index, fallen: bottle numbers, hit: { num, top } | null (the stick's first touch),
 //   before: { [num]: { x, z } } bottle positions before the throw, release: { x, z } where it's thrown from,
@@ -76,6 +78,7 @@ export function thrown(t) {
   const opening = match.throws === 0;
   match.throws++;
   p.throws++;
+  p.knocked += f.length;
   const pts = !f.length ? 0 : single ?? f.length;
   const wentOver = f.length && t.scoreBefore + pts > t.target;
   if (!f.length) p.missed = true;
@@ -91,6 +94,7 @@ export function thrown(t) {
     if (at && Math.hypot(at.x - t.release.x, at.z - t.release.z) > 6) unlock('longRange');
     if (opening && f.some(n => BACK.includes(n))) unlock('backRow');
     if (FRONT.every(n => f.includes(n))) unlock('bowlingAlley');
+    if (p.knocked >= SPILT_MILK) unlock('spiltMilk');
     if (p.recent.join() === '12,11,10') unlock('countdown');
     if (p.overs >= 3) unlock('yoyo');
     if (t.hit && !f.length) unlock('glancingBlow');
