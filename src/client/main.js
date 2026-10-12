@@ -1042,10 +1042,10 @@ $('#mineCopy').onclick = async () => {
 //   strike: the full starting rack every throw; scored on how many bottles go over
 const TRAIN_THROWS = 10;
 const TRAINING = {
-  target: { name: 'Target Practice', view: 'Look at target', best: 'milkky-training-best' },
-  lateral: { name: 'Lateral Training', view: 'Look at bottle', best: 'milkky-training-best-lateral' },
-  length: { name: 'Length Training', view: 'Look at bottle', best: 'milkky-training-best-length' },
-  strike: { name: 'Strike Training', view: 'Look at bottles', best: 'milkky-training-best-strike' },
+  target: { name: 'Target Practice', short: 'Target', view: 'Look at target', best: 'milkky-training-best' },
+  lateral: { name: 'Lateral Training', short: 'Lateral', view: 'Look at bottle', best: 'milkky-training-best-lateral' },
+  length: { name: 'Length Training', short: 'Length', view: 'Look at bottle', best: 'milkky-training-best-length' },
+  strike: { name: 'Strike Training', short: 'Strike', view: 'Look at bottles', best: 'milkky-training-best-strike' },
 };
 // training: { kind, throws: [...], target: where to aim, land: where the stick first touched down, bottle (lateral/length) }
 // Each throw: { pts, d } plus { long, side } (target), { err, hit } (lateral/length), or { fallen } (strike)
@@ -1145,16 +1145,22 @@ function nextTarget() {
 }
 function renderTraining() {
   const n = training.throws.length, kind = training.kind, total = trainTotal(), best = training.best;
-  // Beside your score: the personal best to beat, and how far off it you are
-  const perThrow = kind === 'strike' ? 12 : 10, need = best - total + 1;
-  const chase = !best ? 'Set one this round' : total > best ? 'New best!'
-    : need <= (TRAIN_THROWS - n) * perThrow ? `${need} more to beat it` : 'Out of reach this time';
-  $('#board').innerHTML = `<div class="chip active"><div class="nm">${TRAINING[kind].name}</div>
+  // Your score and average per throw, your personal best and its average, and (like a cricket chase's required
+  // run rate) the average you need from the throws left to beat it: shown as "10+" in red once it's out of reach
+  const perThrow = kind === 'strike' ? 12 : 10, left = TRAIN_THROWS - n, need = best - total + 1;
+  const avg = x => x.toFixed(1);
+  const rate = need / Math.max(1, left);
+  const chase = !best ? '' : total > best
+    ? '<div class="chip"><div class="nm">To beat it</div><div class="sc">✓</div><div class="tsub">New best!</div></div>'
+    : `<div class="chip"><div class="nm">To beat it</div>
+      <div class="sc ${rate > perThrow ? 'over' : ''}">${rate > perThrow ? `${perThrow}+` : avg(rate)}<small> a throw</small></div>
+      <div class="tsub">${need} from ${left}</div></div>`;
+  $('#board').innerHTML = `<div class="chip active"><div class="nm">${TRAINING[kind].short}</div>
     <div class="sc">${total}<small> ${kind !== 'strike' ? 'pts' : total === 1 ? 'bottle' : 'bottles'}</small></div>
-    <div class="tsub">Throw ${Math.min(n + 1, TRAIN_THROWS)} of ${TRAIN_THROWS}</div></div>
-    <div class="chip"><div class="nm">Personal best</div>
+    <div class="tsub">${Math.min(n + 1, TRAIN_THROWS)}/${TRAIN_THROWS} · avg ${n ? avg(total / n) : '–'}</div></div>
+    <div class="chip"><div class="nm">Best</div>
     <div class="sc">${best || '–'}<small> / ${trainMax(kind)}</small></div>
-    <div class="tsub">${chase}</div></div>`;
+    <div class="tsub">${best ? `avg ${avg(best / TRAIN_THROWS)}` : 'Set one now'}</div></div>${chase}`;
 }
 // The stick has come to rest: score the throw
 function resolveTraining() {
