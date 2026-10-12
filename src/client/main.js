@@ -14,6 +14,7 @@ import { showMilkKing } from './milkking.js';
 import { faceSVG } from './faces.js';
 import * as Achv from './achievements.js';
 import * as Push from './push.js';
+import { wormHTML } from './worm.js';
 import { botById } from '../shared/roster.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey, serverOverride } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
@@ -73,8 +74,14 @@ function startGame(types) {
   mode = 'quick'; game.target = chosenTarget;
   launch(0);
 }
+// The game's worm: each player's score after each of their throws (game.log: [player, score after, missed])
+function gameWorm(g) {
+  const series = g.players.map((p, i) => ({ name: p.name, color: p.color,
+    points: (g.log || []).filter(e => e[0] === i).map(e => ({ y: e[1], miss: !!e[2] })) }));
+  return series.some(s => s.points.length) ? wormHTML(series, { max: g.target, target: g.target }) : '';
+}
 function launch(first) {
-  game.cur = first; game.winner = null; physics.removeStick(); resetBottles();
+  game.cur = first; game.winner = null; game.log = []; physics.removeStick(); resetBottles();
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
   Achv.gameStarted(game.players.map(p => !p.cpu)); // on this device, every person's throws count
   beginTurn();
@@ -202,6 +209,7 @@ function resolveThrow() {
   fallen.forEach(p => p.label.material.color.set(0xff6b5b));
   const thrower = game.cur, before = game.players[thrower], scoreBefore = before.score, missesBefore = before.misses;
   const msg = scoreThrow(game, fallen.map(p => p.num));
+  game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]); // for the worm
   Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, needle: physics.needle, before: throwFrom || {}, release: RELEASE,
     target: game.target, players: game.players, scoreBefore, missesBefore,
     winner: game.winner ? game.players.indexOf(game.winner) : -1, over: isGameOver(game) });
@@ -238,6 +246,7 @@ function showOver() {
   $('#overTitle').textContent = !winner ? 'Out after three misses' : isMe(game.players.indexOf(winner)) ? 'You win!' : `${winner.name} ${verb(winner, 'wins', 'win')}!`;
   const sorted = [...game.players].sort((a, b) => b.score - a.score);
   $('#standings').innerHTML = sorted.map(p => `<li><span style="color:${p.color};font-weight:600">${esc(p.name)}${p.out ? ' (out)' : ''}</span><b>${p.score}</b></li>`).join('');
+  $('#overWorm').innerHTML = gameWorm(game);
   $('#againBtn').textContent = mode === 'league' ? 'Continue' : mode === 'online' ? 'Back to room' : 'Play again';
   $('#overNew').textContent = mode === 'online' ? 'Leave room' : 'Change players';
   $('#overNew').hidden = mode === 'league';
@@ -709,7 +718,18 @@ function showHub() {
   updatePush();
 }
 function peekHub() { refreshHub(); $('#hub').hidden = false; }
+// Our game's worm, kept for the league screen once it's over
+function noteWorm(match) {
+  if (match === online.myMatch) online.lastWorm = { match, html: gameWorm(game) };
+}
+function renderHubWorm() {
+  const mine = myFixture(online.fixtures, online.seat), w = online.lastWorm;
+  const show = !!(mine?.over && w?.match === mine.id && w.html);
+  $('#hubWormWrap').hidden = !show;
+  if (show) $('#hubWorm').innerHTML = w.html;
+}
 function refreshHub() {
+  if (online) renderHubWorm();
   if (online?.room?.career) {
     const r = online.room, now = performance.now();
     return renderCareerHub({ room: r, fixtures: online.fixtures, you: online.seat, view: online.view, watching: online.watching, tier: online.careerTier ?? null,
@@ -786,6 +806,7 @@ document.addEventListener('visibilitychange', () => {
 });
 function applyGame(g) {
   game.players = g.players.map(p => ({ ...p }));
+  game.log = g.log || [];
   game.cur = g.cur; game.target = g.target;
   game.winner = g.winner >= 0 ? game.players[g.winner] : null;
 }
@@ -806,6 +827,7 @@ function onlineSync(m) {
   physics.removeStick();
   clearMilk(bottles); bottles.forEach(p => p.label.material.color.set(0xffffff));
   applyGame(m.game); snapPoses(m.poses); setStickHeld();
+  if (m.over) noteWorm(m.match);
   // Achievements count in our own game; joining partway (a rejoin) doesn't count as the opening throw
   if (online.view === 'game') Achv.gameStarted(game.players.map((p, i) => isMe(i)), { midway: m.t === 'sync' }); else Achv.gameLeft();
   state = 'remote'; renderBoard(); refreshEmotes();
@@ -887,6 +909,7 @@ function resolveOnlineThrow() {
   const fallen = new Set(m.fallen);
   bottles.forEach(p => { if (fallen.has(p.num)) p.label.material.color.set(0xff6b5b); });
   applyGame(m.game); game.cur = m.seat; // keep the thrower highlighted until the next turn
+  if (m.over) noteWorm(m.match);
   if (online.view === 'game') { // our own game (not one we're watching)
     const f = online.throwFrom;
     Achv.thrown({ who: m.seat, fallen: m.fallen, hit: m.hit, needle: m.needle, before: f.before, release: RELEASE, target: game.target,
@@ -1041,6 +1064,20 @@ $('#mineCopy').onclick = async () => {
 //   length: one bottle straight ahead, moved nearer and further; scored on long/short only
 //   strike: the full starting rack every throw; scored on how many bottles go over
 const TRAIN_THROWS = 10;
+// Your personal best in a mode: its total, and (for bests set since the worm) each throw's points
+function readBest(kind) {
+  const key = TRAINING[kind].best;
+  let total = 0, throws = null;
+  try {
+    total = +localStorage.getItem(key) || 0;
+    const t = JSON.parse(localStorage.getItem(key + '-throws'));
+    if (Array.isArray(t) && t.length === TRAIN_THROWS && t.reduce((s, x) => s + x, 0) === total) throws = t;
+  } catch (e) {}
+  return { total, throws };
+}
+function saveBest(kind, total, throws) {
+  try { localStorage.setItem(TRAINING[kind].best, total); localStorage.setItem(TRAINING[kind].best + '-throws', JSON.stringify(throws)); } catch (e) {}
+}
 const TRAINING = {
   target: { name: 'Target Practice', short: 'Target', view: 'Look at target', best: 'milkky-training-best' },
   lateral: { name: 'Lateral Training', short: 'Lateral', view: 'Look at bottle', best: 'milkky-training-best-lateral' },
@@ -1102,9 +1139,8 @@ function bottlesAway(away) {
 }
 function openTrainingMenu() {
   ['#setup', '#trainOver'].forEach(s => $(s).hidden = true);
-  for (const [kind, t] of Object.entries(TRAINING)) {
-    let best = 0;
-    try { best = +localStorage.getItem(t.best) || 0; } catch (e) {}
+  for (const kind of Object.keys(TRAINING)) {
+    const best = readBest(kind).total;
     $(`#trBest-${kind}`).textContent = best ? `Best ${best} / ${trainMax(kind)}` : '';
   }
   $('#trainMenu').hidden = false;
@@ -1113,9 +1149,8 @@ function startTraining(kind) {
   mode = 'training'; leagueMatch = null; cpu = null; tween = null; physicsOn = true;
   ['#setup', '#over', '#league', '#trainOver', '#trainMenu'].forEach(s => $(s).hidden = true);
   physics.removeStick(); clearMilk(bottles); bottlesAway(true);
-  let best = 0; // your personal best in this mode, shown while you play
-  try { best = +localStorage.getItem(TRAINING[kind].best) || 0; } catch (e) {}
-  training = { kind, throws: [], target: V(0, 0, 0), land: null, best };
+  const pb = readBest(kind); // your personal best in this mode, shown while you play and on the worm after
+  training = { kind, throws: [], target: V(0, 0, 0), land: null, best: pb.total, bestThrows: pb.throws };
   nextTarget();
 }
 function nextTarget() {
@@ -1150,7 +1185,9 @@ function renderTraining() {
   const perThrow = kind === 'strike' ? 12 : 10, left = TRAIN_THROWS - n, need = best - total + 1;
   const avg = x => x.toFixed(1);
   const rate = need / Math.max(1, left);
-  const chase = !best ? '' : total > best
+  const chase = !best ? '' : !left && total <= best // the round's over and it wasn't beaten
+    ? `<div class="chip"><div class="nm">To beat it</div><div class="sc over">✗</div><div class="tsub">${need} short</div></div>`
+    : total > best
     ? '<div class="chip"><div class="nm">To beat it</div><div class="sc">✓</div><div class="tsub">New best!</div></div>'
     : `<div class="chip"><div class="nm">To beat it</div>
       <div class="sc ${rate > perThrow ? 'over' : ''}">${rate > perThrow ? `${perThrow}+` : avg(rate)}<small> a throw</small></div>
@@ -1191,8 +1228,10 @@ function resolveTraining() {
 function showTrainingResult() {
   state = 'over';
   const kind = training.kind, ts = training.throws, total = trainTotal(), max = trainMax(kind);
-  let prev = 0;
-  try { prev = +localStorage.getItem(TRAINING[kind].best) || 0; if (total > prev) localStorage.setItem(TRAINING[kind].best, total); } catch (e) {}
+  const prev = training.best;
+  if (total > prev) saveBest(kind, total, ts.map(t => t.pts));
+  $('#trWormLabel').textContent = prev ? 'Against your personal best' : 'This round';
+  $('#trWorm').innerHTML = trainingWorm(ts.map(t => t.pts), prev, training.bestThrows, max);
   $('#trTitle').textContent = total > prev && prev ? 'New personal best!' : `${TRAINING[kind].name} complete`;
   const stat = (label, value) => `<div><span>${label}</span><b>${value}</b></div>`;
   const part = (label, errs, plus, minus) => `<div><span>${label}</span><b>${partScore(errs)}<small> / ${TRAIN_THROWS * 10}</small></b>
@@ -1229,6 +1268,18 @@ function showTrainingResult() {
   $('#trParts').innerHTML = parts; $('#trParts').hidden = !parts;
   $('#trThrows').innerHTML = rows.join('');
   $('#trainOver').hidden = false;
+}
+// Running totals, throw by throw: this round, and your best (its own throws, or a straight line at its average
+// pace for a best set before throws were kept)
+function trainingWorm(pts, best, bestThrows, max) {
+  const running = list => { let s = 0; return list.map(p => ({ y: s += p, miss: !p })); };
+  const series = [{ name: 'This round', color: '#1f4e8c', points: running(pts) }];
+  if (bestThrows) series.push({ name: `Personal best (${best})`, color: '#d4a017', points: running(bestThrows) });
+  else if (best) series.push({ name: `Personal best (${best}), at its average pace`, color: '#d4a017', dashed: true,
+    points: Array.from({ length: TRAIN_THROWS }, (_, i) => ({ y: best * (i + 1) / TRAIN_THROWS })) });
+  // Scaled to just above whichever finished higher, so low totals aren't squashed flat
+  const top = Math.max(10, best, pts.reduce((s, p) => s + p, 0));
+  return wormHTML(series, { max: Math.min(max, Math.ceil(top * 1.1 / 10) * 10), yLabel: 'Total' });
 }
 function exitTraining() {
   training = null; targetMesh.visible = false; landRing.visible = false;

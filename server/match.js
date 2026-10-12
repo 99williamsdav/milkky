@@ -38,6 +38,7 @@ export class Match {
       // Bots play at their level, or (career bots) their own skill
       players: seats.map((s, i) => newPlayer(s.name, s.cpu ? s.ai || LEVELS[s.cpu] : null, COLORS[i])),
       cur: first, target, winner: null,
+      log: [], // every throw so far, for the worm: [player index, their score after it, 1 if a miss]
     };
     this.spectators = new Set();
     this.over = false; this.busyUntil = 0; this.timer = null; this.turnInfo = null;
@@ -57,7 +58,7 @@ export class Match {
   publicGame() {
     const g = this.game;
     return {
-      cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
+      cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1, log: [...g.log],
       players: g.players.map((p, i) => {
         const s = this.seats[i];
         return { name: p.name, cpu: p.cpu, color: p.color, score: p.score, misses: p.misses, out: p.out,
@@ -189,6 +190,7 @@ export class Match {
     const { bodies, frames, fps } = simulateThrow(physics, dist, aim);
     const fallen = physics.fallenBottles().map(b => b.num);
     const msg = scoreThrow(game, fallen);
+    game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]);
 
     const plan = planRestand(physics.bottles.map(b => ({ t: b.body.translation(), q: b.body.rotation() })), this.rng);
     physics.removeStick();
@@ -234,7 +236,7 @@ export class Match {
       seats: this.seats.map(seatRef),
       game: {
         cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
-        players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })),
+        players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })), log: g.log,
       },
       poses: snapshot(this.physics),
       seq: this.seq, history: this.history, base: this.base, seen: this.seen,
@@ -246,6 +248,7 @@ export class Match {
     if (d.seq) Object.assign(m, { seq: d.seq, history: d.history || [], base: d.base || null, seen: d.seen || m.seen });
     d.game.players.forEach((p, i) => Object.assign(m.game.players[i], p));
     m.game.winner = d.game.winner >= 0 ? m.game.players[d.game.winner] : null;
+    m.game.log = d.game.log || [];
     m.physics.bottles.forEach((b, i) => {
       const [x, y, z, qx, qy, qz, qw] = d.poses[i];
       b.body.setTranslation({ x, y, z }, true); b.body.setRotation({ x: qx, y: qy, z: qz, w: qw }, true);

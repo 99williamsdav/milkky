@@ -67,6 +67,7 @@ A.send({ t: 'rejoin', code: aJoined.code, token: aJoined.token });
 const sync = await A.next(m => m.t === 'sync' || m.t === 'error');
 check(sync.t === 'sync', 'after a restart, Alice rejoins her game');
 check(scores(sync.game) === scores(before.game) && sync.game.cur === before.game.cur, `scores and turn are as they were (${scores(sync.game)})`);
+check(JSON.stringify(sync.game.log) === JSON.stringify(before.game.log) && sync.game.log.length > 0, `the worm's history survives too (${sync.game.log.length} throws)`);
 const drift = Math.max(...sync.poses.flatMap((p, i) => p.map((v, k) => Math.abs(v - before.poses[i][k]))));
 check(drift < 1e-3, `every bottle is where it was (largest difference ${drift.toExponential(1)})`);
 B.send({ t: 'rejoin', code: aJoined.code, token: bJoined.token });

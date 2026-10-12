@@ -118,6 +118,10 @@ const lens = A.throws.map(t => t.frames.length);
 console.log(`Frames per throw: min ${Math.min(...lens)}, max ${Math.max(...lens)}; largest message ${(A.maxBytes / 1024).toFixed(1)} KB`);
 check(A.throws.every(t => t.bodies.includes(12) && t.frames.every(f => f.length === 7 * t.bodies.length)), 'frames hold a pose for each moving body, stick included');
 console.log(`Bottles moving per throw: ${A.throws.map(t => t.bodies.length - 1).join(' ')}`);
+// The worm: the game carries every throw's score
+const log = last.game.log;
+check(log.length === A.throws.length && A.throws.every((t, i) => log[i][0] === t.seat && log[i][1] === t.game.players[t.seat].score && log[i][2] === (t.fallen.length ? 0 : 1)),
+  `each throw's score is kept for the worm (${log.length} throws)`);
 const over = await A.next(m => m.t === 'room' && m.phase === 'over');
 check(over.seats.length === 3, 'room returns to the lobby after the game');
 
