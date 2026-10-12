@@ -23,6 +23,7 @@ export const ACHIEVEMENTS = [
   { id: 'butterfingers', group: 'Funny ones', name: 'Butterfingers', desc: 'Go out with three misses in a row' },
   { id: 'yoyo', group: 'Funny ones', name: 'Yo-Yo', desc: 'Go over the target three times in one game' },
   { id: 'soClose', group: 'Funny ones', name: 'So Close', desc: 'Lose a game when you needed just 1 point' },
+  { id: 'jammyDodger', group: 'Funny ones', name: 'Jammy Dodger', desc: 'Finish a game on 0 points' },
   { id: 'goingUp', group: 'Career', name: 'Going Up', desc: 'Win your first promotion' },
   { id: 'backToBack', group: 'Career', name: 'Back to Back', desc: 'Win promotion two seasons in a row' },
   { id: 'underdogs', group: 'Career', name: 'Underdogs', desc: 'Win a cup game against a player from a higher league' },
@@ -101,6 +102,7 @@ export function thrown(t) {
   match.players.forEach((q, i) => {
     if (!q.mine) return;
     const now = t.players[i];
+    if (now.score === 0) unlock('jammyDodger');
     if (i === t.winner) {
       if (i === t.who && single === 12) unlock('hailMary');
       if ((i === t.who ? t.missesBefore : now.misses) >= 2) unlock('clutch');
