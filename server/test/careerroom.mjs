@@ -104,6 +104,15 @@ check(C.tierOf(s2.state, dId) === 2 && !s2.state.waiting.length, 'Dan is in the 
 check(!!s2.state.summary.people[aId] && !!s2.state.summary.people[bId] && !s2.state.summary.people[dId], 'the season summary covers Alice and Bob');
 check(new Set(s2.state.tiers.flat()).size === 24, 'still 24 players');
 
+// Career stats: Alice's own, kept across the restart (7 league games, plus her cup ties)
+const aStats = (await waitFor(() => A.room?.career?.state.season === 2 && A.room.career.stats, 'Alice\'s stats'));
+const aCupTies = s1.cup.ties.filter(r => r.some(t => t.a === aId || t.b === aId)).length;
+check(aStats.games === 7 + aCupTies && aStats.won + aStats.lost === aStats.games && aStats.cupPlayed === aCupTies,
+  `Alice's stats count her ${aStats.games} games (7 league, ${aCupTies} cup): ${aStats.won} won, ${aStats.lost} lost`);
+check(aStats.throws > 0 && aStats.points > 0 && aStats.bottles > 0 && aStats.seasons === 1, `and her throws (${aStats.throws} throws, ${aStats.points} points, ${aStats.bottles} bottles) and season`);
+check(aStats.vs[bId]?.w + aStats.vs[bId]?.l >= 1, 'and her games against Bob (they meet in the league, and maybe the cup)');
+check(!B.room?.career?.stats || B.room.career.stats !== aStats, 'each person only gets their own stats');
+
 // ---------- Leaving ----------
 B.send({ t: 'leave' });
 await waitFor(() => career()?.people[bId]?.left, 'Bob to have left');

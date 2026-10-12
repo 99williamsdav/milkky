@@ -127,6 +127,7 @@ export function renderCareerHub({ room, fixtures, you, view, watching, tier, msT
   if (view === 'game') btns.push('<button class="primary" data-act="back">Back to my game</button>');
   if (view === 'watch') btns.push('<button class="primary" data-act="back">Back to watching</button>');
   if (between && host) btns.push(`<button class="primary" data-act="next">Start next ${over ? 'season' : 'round'} now</button>`);
+  if (!waiting || cs.stats) btns.push('<button data-act="stats">Stats</button>');
   if (room.phase !== 'over') btns.push('<button data-act="mine">My games</button>', '<button data-act="leave">Leave career</button>');
   else btns.push('<button data-act="leave">Leave room</button>');
   $('#hubBtns').innerHTML = btns.join('');

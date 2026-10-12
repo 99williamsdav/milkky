@@ -14,6 +14,7 @@ import { LEVELS, aiFromSkill } from '../src/shared/ai.js';
 import { ROSTER, botsForLevel, botById } from '../src/shared/roster.js';
 import { roundRobin, peopleLast } from '../src/shared/schedule.js';
 import * as Career from '../src/shared/career.js';
+import * as Stats from '../src/shared/careerstats.js';
 import { Match, TURN_TIME, ASYNC_TURN_TIME } from './match.js';
 import * as store from './store.js';
 import * as push from './push.js';
@@ -58,6 +59,7 @@ export class Room {
     this.career = null;     // the career's state (shared/career.js), and the results of this step's played games
     this.stepResults = {};
     this.botSeats = new Map(); // career: a seat for each bot playing in a match, by bot id
+    this.careerStats = {};     // career: each person's stats (shared/careerstats.js), by their career id
     this.timer = null;      // next league round (live), or this round's deadline (async)
     this.emptySince = null;
     this.updatedAt = Date.now();
@@ -190,7 +192,7 @@ export class Room {
     const people = {};
     for (const s of this.seats) if (s.pid) people[s.pid] = { name: s.name, seat: this.seatIndex(s), left: !!s.left };
     return {
-      state: c, people, you: forSeat?.pid || null,
+      state: c, people, you: forSeat?.pid || null, stats: (forSeat?.pid && this.careerStats[forSeat.pid]) || null,
       nextStepIn: this.phase === 'between' ? Math.max(0, this.nextRoundAt - Date.now()) : null,
       stepEndsIn: this.phase === 'playing' && this.roundEndsAt ? Math.max(0, this.roundEndsAt - Date.now()) : null,
     };
@@ -443,6 +445,7 @@ export class Room {
   startCareer() {
     this.league = null;
     this.career = Career.newCareer({ people: this.seats.filter(s => !s.cpu).map(s => s.pid), target: this.target });
+    this.careerStats = {};
     this.startStep();
   }
   // The next step of the season: a match for each game with a person in it; if there are none (everyone's
@@ -472,8 +475,26 @@ export class Room {
     const [pa, pb] = m.game.players;
     const aWon = m.game.winner ? m.game.winner === pa : pa.score >= pb.score;
     this.stepResults[m.fixture] = { sa: pa.score, sb: pb.score, aWon };
+    // Each person's stats: the result, and the throws they made themselves
+    const cup = Career.currentStep(this.career)?.kind === 'cup';
+    m.seats.forEach((seat, i) => {
+      if (!seat.pid) return;
+      const other = m.seats[1 - i], me = m.game.players[i], them = m.game.players[1 - i];
+      Stats.recordGame(this.statsFor(seat.pid), m.tally?.[i] || Stats.newTally(),
+        { won: i === 0 ? aWon : !aWon, cup, opp: other.pid || other.bot, youOut: me.out, theyOut: them.out });
+    });
     if (this.matches.every(x => x.over)) return this.endStep();
     this.broadcastRoom();
+  }
+  statsFor(pid) {
+    const tier = Career.tierOf(this.career, pid);
+    return (this.careerStats[pid] ||= Stats.emptyStats(this.career.season, tier < 0 ? Career.BOTTOM : tier));
+  }
+  // A throw in a career game (called by the match): it counts for a person's stats if they threw it themselves
+  thrown(m, i, fallen, scoreBefore, own) {
+    if (this.mode !== 'career' || !own || !m.seats[i].pid) return;
+    m.tally ||= {};
+    Stats.recordThrow(m.tally[i] ||= Stats.newTally(), fallen, scoreBefore, m.game.target);
   }
   // Every played game is done: simulate the rest of the step, then pause (longer at the end of a season)
   endStep() {
@@ -497,6 +518,7 @@ export class Room {
     if (Career.seasonOver(c)) {
       const gone = this.seats.filter(s => s.left && s.pid);
       Career.nextSeason(c, Math.random, { remove: gone.map(s => s.pid) });
+      for (const [pid, line] of Object.entries(c.summary.people)) Stats.recordSeason(this.statsFor(pid), line);
       gone.filter(s => !Career.inCareer(c, s.pid)).forEach(s => this.removeSeat(s));
       for (const s of this.seats) {
         const tier = Career.tierOf(c, s.pid);
@@ -516,7 +538,7 @@ export class Room {
       v: 1, code: this.code, origin: this.origin, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target,
       nextRoundAt: this.nextRoundAt || null, roundEndsAt: this.roundEndsAt || null, updatedAt: this.updatedAt, lastVisit: this.lastVisit,
       seats: this.seats.map(s => ({ name: s.name, cpu: s.cpu, bot: s.bot || null, token: s.token, me: s.me || null, left: !!s.left, pid: s.pid || null })),
-      career: this.career, stepResults: this.stepResults,
+      career: this.career, stepResults: this.stepResults, careerStats: this.careerStats,
       league: lg && {
         round: lg.round, schedule: lg.schedule, results: lg.results,
         entries: lg.entries.map(e => ({
@@ -534,7 +556,7 @@ export class Room {
     const back = Date.now() + RESTART_GRACE;
     Object.assign(room, { origin: d.origin || null, mode: d.mode, pace: d.pace || 'live', phase: d.phase, target: d.target, nextRoundAt: d.nextRoundAt,
       emptySince: Date.now(), updatedAt: d.updatedAt || Date.now(), lastVisit: d.lastVisit || Date.now(),
-      career: d.career || null, stepResults: d.stepResults || {} });
+      career: d.career || null, stepResults: d.stepResults || {}, careerStats: d.careerStats || {} });
     room.seats = d.seats.map(s => ({ ...s, ws: null, connected: !!s.cpu, awaySince: back }));
     if (d.league) {
       room.league = {

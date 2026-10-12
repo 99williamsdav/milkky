@@ -433,7 +433,7 @@ function exitOnline() {
   physics.removeStick(); resetBottles(); setStickHeld(); state = 'menu';
   $('#newBtn').textContent = 'New game'; $('#board').innerHTML = '';
   $('#ticker').hidden = true; $('#hubBtn').hidden = true; $('#watchers').hidden = true; showEmotes(false);
-  ['#online', '#lobby', '#over', '#hub', '#mine'].forEach(s => $(s).hidden = true);
+  ['#online', '#lobby', '#over', '#hub', '#mine', '#careerStats'].forEach(s => $(s).hidden = true);
   setRoomParam(null);
 }
 const isAsync = () => online?.room?.pace === 'async';
@@ -721,7 +721,7 @@ function renderLobby() {
 function showHub() {
   online.view = 'hub'; online.overQueued = false; state = 'menu'; cpu = null; aimLine.visible = false;
   online.turnEndsAt = null; renderWatchers();
-  ['#over', '#online', '#setup', '#lobby'].forEach(s => $(s).hidden = true);
+  ['#over', '#online', '#setup', '#lobby', '#careerStats'].forEach(s => $(s).hidden = true);
   refreshHub(); $('#hub').hidden = false;
   updatePush();
 }
@@ -827,7 +827,7 @@ function snapPoses(poses) {
 }
 // A new game, catching up after rejoining, or starting to watch one: draw it as the server has it.
 function onlineSync(m) {
-  ['#lobby', '#over', '#online', '#setup', '#league', '#hub'].forEach(s => $(s).hidden = true);
+  ['#lobby', '#over', '#online', '#setup', '#league', '#hub', '#careerStats'].forEach(s => $(s).hidden = true);
   online.view = m.match === online.myMatch ? 'game' : 'watch';
   online.watchers = []; setWatchers(m.match, m.watchers || [], false);
   online.play = online.pending = null; online.overQueued = false; online.turnEndsAt = null;
@@ -979,6 +979,10 @@ $('#hubBtns').addEventListener('click', e => {
   else if (act === 'next') net.send({ t: 'next' });
   else if (act === 'room') showLobby();
   else if (act === 'mine') stepAway();
+  else if (act === 'stats') { // an online career: your stats, kept by the server
+    const cs = online.room.career;
+    showCareerStats(cs.stats, cs.state.season, '#hub', id => cs.people[id]?.name ?? botById(id)?.name ?? 'Someone who left');
+  }
   else if (act === 'leave') {
     const sure = online.room.phase === 'over' || confirm(online.room.mode === 'career'
       ? 'Leave the career? The computer will play your games until the end of the season, then a computer player takes your place.'
@@ -1416,13 +1420,17 @@ $('#againBtn').onclick = () => {
 $('#leagueBtn').onclick = openLeague;
 $('#lgPlay').onclick = playLeagueMatch;
 $('#lgMenu').onclick = () => { $('#league').hidden = true; $('#setup').hidden = false; };
-$('#lgStats').onclick = () => {
-  const s = solo().stats;
-  $('#csSub').textContent = s?.games ? `Your career${s.since > 1 ? ` since season ${s.since}` : ''}: ${s.games} game${s.games > 1 ? 's' : ''} over ${solo().season - s.since + 1} season${solo().season - s.since ? 's' : ''}.` : '';
-  $('#csBody').innerHTML = Stats.renderStats(s);
-  $('#league').hidden = true; $('#careerStats').hidden = false;
-};
-$('#csBack').onclick = () => { $('#careerStats').hidden = true; $('#league').hidden = false; };
+// The Career stats screen, over the screen it was opened from (solo Career Mode's, or an online career's)
+let statsFrom = '#league';
+function showCareerStats(s, season, from, nameOf) {
+  const seasons = s ? season - s.since + 1 : 0;
+  $('#csSub').textContent = s?.games ? `Your career${s.since > 1 ? ` since season ${s.since}` : ''}: ${s.games} game${s.games > 1 ? 's' : ''} over ${seasons} season${seasons > 1 ? 's' : ''}.` : '';
+  $('#csBody').innerHTML = Stats.renderStats(s, nameOf);
+  statsFrom = from;
+  $(from).hidden = true; $('#careerStats').hidden = false;
+}
+$('#lgStats').onclick = () => showCareerStats(solo().stats, solo().season, '#league');
+$('#csBack').onclick = () => { $('#careerStats').hidden = true; $(statsFrom).hidden = false; };
 $('#lgReset').onclick = () => { if (confirm('Start a new career from the Sunday League? Your career so far will be lost.')) openNewLeague(); };
 $('#lgLength').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setLength(+b.dataset.t); });
 $('#lgCreate').onclick = () => { League.newCareer(newLength); openLeague(); };

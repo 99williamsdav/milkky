@@ -187,9 +187,11 @@ export class Match {
     if (this.over) return;
     clearTimeout(this.timer);
     const { physics, game } = this, thrower = game.cur;
+    const scoreBefore = game.players[thrower].score, own = !this.turnInfo?.cpu; // (not the computer throwing)
     const { bodies, frames, fps } = simulateThrow(physics, dist, aim);
     const fallen = physics.fallenBottles().map(b => b.num);
     const msg = scoreThrow(game, fallen);
+    this.room.thrown?.(this, thrower, fallen, scoreBefore, own); // career stats
     game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]);
 
     const plan = planRestand(physics.bottles.map(b => ({ t: b.body.translation(), q: b.body.rotation() })), this.rng);
@@ -239,12 +241,12 @@ export class Match {
         players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })), log: g.log,
       },
       poses: snapshot(this.physics),
-      seq: this.seq, history: this.history, base: this.base, seen: this.seen,
+      seq: this.seq, history: this.history, base: this.base, seen: this.seen, tally: this.tally || null,
     };
   }
   static restore(room, d, seats, onOver) {
     const m = new Match(room, d.id, seats, { target: d.game.target, first: d.game.cur, onOver, pace: d.pace || 'live', turnTime: d.turnTime === undefined ? TURN_TIME : d.turnTime });
-    Object.assign(m, { fixture: d.fixture, over: d.over, autopilot: !!d.autopilot, savedDeadline: d.deadline || null });
+    Object.assign(m, { fixture: d.fixture, over: d.over, autopilot: !!d.autopilot, savedDeadline: d.deadline || null, tally: d.tally || null });
     if (d.seq) Object.assign(m, { seq: d.seq, history: d.history || [], base: d.base || null, seen: d.seen || m.seen });
     d.game.players.forEach((p, i) => Object.assign(m.game.players[i], p));
     m.game.winner = d.game.winner >= 0 ? m.game.players[d.game.winner] : null;
