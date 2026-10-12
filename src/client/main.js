@@ -202,7 +202,7 @@ function resolveThrow() {
   fallen.forEach(p => p.label.material.color.set(0xff6b5b));
   const thrower = game.cur, before = game.players[thrower], scoreBefore = before.score, missesBefore = before.misses;
   const msg = scoreThrow(game, fallen.map(p => p.num));
-  Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, before: throwFrom || {}, release: RELEASE,
+  Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, needle: physics.needle, before: throwFrom || {}, release: RELEASE,
     target: game.target, players: game.players, scoreBefore, missesBefore,
     winner: game.winner ? game.players.indexOf(game.winner) : -1, over: isGameOver(game) });
   toast(msg, 2200); renderBoard();
@@ -889,7 +889,7 @@ function resolveOnlineThrow() {
   applyGame(m.game); game.cur = m.seat; // keep the thrower highlighted until the next turn
   if (online.view === 'game') { // our own game (not one we're watching)
     const f = online.throwFrom;
-    Achv.thrown({ who: m.seat, fallen: m.fallen, hit: m.hit, before: f.before, release: RELEASE, target: game.target,
+    Achv.thrown({ who: m.seat, fallen: m.fallen, hit: m.hit, needle: m.needle, before: f.before, release: RELEASE, target: game.target,
       players: game.players, scoreBefore: f.scoreBefore, missesBefore: f.missesBefore, winner: m.game.winner, over: m.over });
     if (m.over && game.players.some((p, i) => !p.cpu && !isMe(i))) Achv.unlock('goodCompany');
   }

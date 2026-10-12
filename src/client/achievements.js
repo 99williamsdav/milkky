@@ -19,6 +19,7 @@ export const ACHIEVEMENTS = [
   { id: 'speedDemon', group: 'Winning', name: 'Speed Demon', desc: 'Win a game to 50 in 8 throws or fewer' },
   { id: 'countdown', group: 'Winning', name: 'Countdown', desc: 'Score 12, 11, 10 with three throws in a row' },
   { id: 'glancingBlow', group: 'Funny ones', name: 'Glancing Blow', desc: 'Hit a bottle with the stick but knock nothing over' },
+  { id: 'eyeOfNeedle', group: 'Funny ones', name: 'Eye of the Needle', desc: 'Thread the stick through a tiny gap between two bottles, and score nothing' },
   { id: 'butterfingers', group: 'Funny ones', name: 'Butterfingers', desc: 'Go out with three misses in a row' },
   { id: 'yoyo', group: 'Funny ones', name: 'Yo-Yo', desc: 'Go over the target three times in one game' },
   { id: 'soClose', group: 'Funny ones', name: 'So Close', desc: 'Lose a game when you needed just 1 point' },
@@ -61,9 +62,11 @@ export function gameStarted(mine, { midway = false } = {}) {
 }
 
 const FRONT = [1, 2, 3, 10, 4], BACK = [7, 8, 9];
+const NEEDLE_GAP = 0.12; // metres between the two bottles' sides: about two sticks' width
 // A throw has been played and scored. t: {
 //   who: thrower's index, fallen: bottle numbers, hit: { num, top } | null (the stick's first touch),
 //   before: { [num]: { x, z } } bottle positions before the throw, release: { x, z } where it's thrown from,
+//   needle: { a, b, gap } | null (the narrowest gap between standing bottles the stick passed through untouched),
 //   target, players: [{ score, misses, out }] after the throw, scoreBefore, missesBefore (the thrower's),
 //   winner: index or -1, over: the game has ended }
 export function thrown(t) {
@@ -90,6 +93,7 @@ export function thrown(t) {
     if (p.recent.join() === '12,11,10') unlock('countdown');
     if (p.overs >= 3) unlock('yoyo');
     if (t.hit && !f.length) unlock('glancingBlow');
+    if (t.needle && t.needle.gap < NEEDLE_GAP && !f.length) unlock('eyeOfNeedle');
     if (t.players[t.who].out) unlock('butterfingers');
   }
   if (!t.over) return;

@@ -98,7 +98,7 @@ then in `/etc/milkky/<env>.env`: `MILKKY_VAPID_PUBLIC=...`, `MILKKY_VAPID_PRIVAT
 | `watchers` | `match`, `names` (who is watching this game; sent to its players and watchers when it changes) |
 | `aim` | `match`, `aim`, `pull` |
 | `emote` | `match`, `e`, `name`, `seat` (someone in the game, or watching it, sent a face) |
-| `throw` | `match`, `seq`, `seat`, `dist`, `aim`, `fps`, `bodies`, `frames`, `fallen`, `hit` (`{num, top}` the stick's first bottle touch, or null), `msg`, `restand[[i, x, z]]`, `poses`, `game`, `over` |
+| `throw` | `match`, `seq`, `seat`, `dist`, `aim`, `fps`, `bodies`, `frames`, `fallen`, `hit` (`{num, top}` the stick's first bottle touch, or null), `needle` (`{a, b, gap}` the narrowest gap between standing bottles it passed through before touching any, or null), `msg`, `restand[[i, x, z]]`, `poses`, `game`, `over` |
 | `error` | `msg` |
 
 - `phase`: single game `lobby` → `playing` → `over`; league `lobby` → `playing` ⇄ `between` → `over`.

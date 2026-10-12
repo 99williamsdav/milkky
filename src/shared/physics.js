@@ -1,7 +1,7 @@
 // The physics world: ground, bottles, stick and the grass friction model.
 // Rapier is passed in so the browser can load it from a CDN and the server from npm.
 import {
-  BOTTLE_R, BOTTLE_HALF, STICK_R, STICK_HALF, DENSITY, RELEASE, ELEV, FALLEN_Y, homePositions,
+  BOTTLE_R, BOTTLE_H, BOTTLE_HALF, STICK_R, STICK_HALF, DENSITY, RELEASE, ELEV, FALLEN_Y, homePositions, upY,
 } from './constants.js';
 
 // Launch speed needed to travel `dist` metres and arrive at mid-bottle height, at the fixed release angle.
@@ -35,6 +35,10 @@ export function createPhysics(RAPIER) {
   let stick = null, stickCollider = null, acc = 0;
   // The first bottle the stick touched on this throw, and whether it was on its top: { num, top } (or null)
   let firstHit = null;
+  // The narrowest gap between two standing bottles that the stick passed through low down before touching any
+  // bottle: { a, b (their numbers), gap (metres between their sides) }, or null. Only gaps under NEEDLE_LOOK count.
+  let needle = null, lastStick = null;
+  const NEEDLE_LOOK = 0.25;
 
   function placeUpright(body, x, z) {
     body.setTranslation({ x, y: BOTTLE_HALF + 0.0005, z }, true);
@@ -53,7 +57,7 @@ export function createPhysics(RAPIER) {
       .setTranslation(RELEASE.x, RELEASE.y, RELEASE.z).setRotation({ x: right.x * s, y: 0, z: right.z * s, w: c })
       .setLinearDamping(0.15).setAngularDamping(0.7).setCcdEnabled(true).setCanSleep(true));
     stickCollider = world.createCollider(RAPIER.ColliderDesc.cylinder(STICK_HALF, STICK_R).setDensity(DENSITY).setFriction(0.6).setRestitution(0.2), body);
-    firstHit = null;
+    firstHit = null; needle = null; lastStick = null;
     const h = speed * Math.cos(ELEV);
     body.setLinvel({ x: dir.x * h, y: speed * Math.sin(ELEV), z: dir.z * h }, true);
     const spin = 5 + speed; // end-over-end tumble
@@ -88,7 +92,7 @@ export function createPhysics(RAPIER) {
   function advance(dt) {
     applyGrassDrag();
     acc += dt; let n = 0;
-    while (acc >= world.timestep && n < MAX_SUBSTEPS) { rollingResistance(world.timestep); world.step(); noteFirstHit(); acc -= world.timestep; n++; }
+    while (acc >= world.timestep && n < MAX_SUBSTEPS) { rollingResistance(world.timestep); world.step(); noteFirstHit(); noteNeedle(); acc -= world.timestep; n++; }
     if (n === MAX_SUBSTEPS) acc = 0;
   }
 
@@ -110,6 +114,29 @@ export function createPhysics(RAPIER) {
     });
   }
 
+  // Did the stick's centre just pass, below the bottles' tops, between two standing bottles close together
+  // (crossing the line between their centres, in the space between their sides)?
+  function noteNeedle() {
+    if (!stick) return;
+    const p = stick.translation(), q = lastStick;
+    lastStick = { x: p.x, y: p.y, z: p.z };
+    if (!q || firstHit || p.y > BOTTLE_H) return;
+    const standing = bottles.filter(b => upY(b.body.rotation()) > 0.95 && b.body.translation().y < BOTTLE_HALF + 0.01)
+      .map(b => ({ num: b.num, t: b.body.translation() }));
+    for (let i = 0; i < standing.length; i++) {
+      for (let j = i + 1; j < standing.length; j++) {
+        const A = standing[i].t, B = standing[j].t, d = Math.hypot(B.x - A.x, B.z - A.z), gap = d - 2 * BOTTLE_R;
+        if (gap <= 0 || gap >= NEEDLE_LOOK || (needle && gap >= needle.gap)) continue;
+        // Where segments q→p (the stick) and A→B (between the bottles) cross: t along the stick, u along A→B
+        const rx = p.x - q.x, rz = p.z - q.z, sx = B.x - A.x, sz = B.z - A.z, den = rx * sz - rz * sx;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((A.x - q.x) * sz - (A.z - q.z) * sx) / den, u = ((A.x - q.x) * rz - (A.z - q.z) * rx) / den;
+        if (t < 0 || t > 1 || u < BOTTLE_R / d || u > 1 - BOTTLE_R / d) continue;
+        needle = { a: standing[i].num, b: standing[j].num, gap };
+      }
+    }
+  }
+
   const allBodies = () => stick ? [...bottles.map(b => b.body), stick] : bottles.map(b => b.body);
   const isMoving = () => allBodies().some(b => !b.isSleeping() && (len(b.linvel()) > 0.03 || len(b.angvel()) > 0.4));
   const fallenBottles = () => bottles.filter(b => b.body.translation().y < FALLEN_Y);
@@ -120,6 +147,7 @@ export function createPhysics(RAPIER) {
     world, bottles,
     get stick() { return stick; },
     get firstHit() { return firstHit; },
+    get needle() { return needle; },
     placeUpright, resetBottles, throwStick, removeStick, advance, isMoving, fallenBottles, bottleSpots,
   };
 }

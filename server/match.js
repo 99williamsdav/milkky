@@ -205,6 +205,7 @@ export class Match {
     const t = {
       t: 'throw', seq: ++this.seq, seat: thrower, dist, aim, fps, bodies, frames, fallen, msg, restand,
       hit: physics.firstHit, // first bottle the stick touched, and whether on its top (for achievements)
+      needle: physics.needle, // the narrowest gap it went through untouched (likewise)
       poses: snapshot(physics), game: this.publicGame(), over,
     };
     this.send(t);
