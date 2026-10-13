@@ -22,10 +22,10 @@ import * as push from './push.js';
 const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[name] : fallback);
 export const MAX_SEATS = { game: 4, league: 8, career: 16 };
 const TARGETS = [20, 30, 50];
-// The rules: the classic game, Siege ('battle': shared/battle.js) or Milkkshake ('milkshake': shared/milkshake.js),
-// the last two for two players
+// The rules: the classic game, Siege ('battle': shared/battle.js, two players) or Milkkshake ('milkshake':
+// shared/milkshake.js, two to four). Leagues and careers are head to head whatever the rules.
 const VARIANTS = ['classic', 'battle', 'milkshake'];
-const TWO_PLAYER = v => v === 'battle' || v === 'milkshake';
+const SINGLE_SEATS = { battle: [2, 2], milkshake: [2, 4] }; // a single game's fewest and most players
 const PACES = ['live', 'async'];
 const CPU_LEVELS = Object.keys(LEVELS);
 const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
@@ -83,7 +83,7 @@ export class Room {
   // A career takes people at any time (they wait for the next season)
   canJoin() { return (!this.inProgress || this.mode === 'career') && this.seats.length < this.maxSeats(); }
   // A single Siege or Milkkshake is for two; otherwise as many as the game type allows
-  maxSeats(mode = this.mode) { return mode === 'game' && TWO_PLAYER(this.variant) ? 2 : MAX_SEATS[mode]; }
+  maxSeats(mode = this.mode, variant = this.variant) { return mode === 'game' && SINGLE_SEATS[variant] ? SINGLE_SEATS[variant][1] : MAX_SEATS[mode]; }
   uniqueName(name) {
     let n = name, k = 2;
     while (this.seats.some(s => s.name === n)) n = `${name} ${k++}`;
@@ -270,7 +270,7 @@ export class Room {
       case 'mode':
         if (lobbyOnly('change the game type')) return;
         if (!(m.mode in MAX_SEATS)) return this.error(seat, 'Unknown game type');
-        if (this.seats.length > this.maxSeats(m.mode)) return this.error(seat, `A single ${TWO_PLAYER(this.variant) ? 'game of these rules' : 'game'} is for up to ${this.maxSeats(m.mode)} players`);
+        if (this.seats.length > this.maxSeats(m.mode)) return this.error(seat, `A single game is for up to ${this.maxSeats(m.mode)} players with these rules`);
         this.mode = m.mode;
         // A career is played at leisure, against its own bots
         if (m.mode === 'career') { this.pace = 'async'; this.seats.filter(s => s.cpu).forEach(s => this.removeSeat(s)); }
@@ -283,7 +283,7 @@ export class Room {
       case 'variant':
         if (lobbyOnly('change the rules')) return;
         if (!VARIANTS.includes(m.variant)) return this.error(seat, 'Unknown rules');
-        if (TWO_PLAYER(m.variant) && this.mode === 'game' && this.seats.length > 2) return this.error(seat, 'That game is for 2 players: remove some first');
+        if (this.seats.length > this.maxSeats(this.mode, m.variant)) return this.error(seat, `That game is for up to ${this.maxSeats(this.mode, m.variant)} players: remove some first`);
         this.variant = m.variant; return this.broadcastRoom();
       case 'target':
         if (lobbyOnly('change the target')) return;
@@ -293,7 +293,7 @@ export class Room {
         if (lobbyOnly('add players')) return;
         if (!CPU_LEVELS.includes(m.level)) return this.error(seat, 'Unknown level');
         if (this.mode === 'career') return this.error(seat, 'A career brings its own computer players');
-        if (this.seats.length >= this.maxSeats()) return this.error(seat, TWO_PLAYER(this.variant) && this.mode === 'game' ? 'This game is for 2 players' : 'The room is full');
+        if (this.seats.length >= this.maxSeats()) return this.error(seat, SINGLE_SEATS[this.variant] && this.mode === 'game' ? `This game is for up to ${this.maxSeats()} players` : 'The room is full');
         this.seats.push(this.newBot(m.level));
         return this.broadcastRoom();
       case 'removeCpu': {
@@ -351,7 +351,10 @@ export class Room {
   start(seat) {
     this.dropAbsentSeats(); // anyone who left (or, live, isn't here) doesn't play
     if (this.mode === 'league' && this.seats.length < 2) return this.error(seat, 'A league needs at least 2 players');
-    if (this.mode === 'game' && TWO_PLAYER(this.variant) && this.seats.length !== 2) return this.error(seat, 'This game is for exactly 2 players');
+    const [fewest, most] = SINGLE_SEATS[this.variant] || [1, MAX_SEATS.game];
+    if (this.mode === 'game' && (this.seats.length < fewest || this.seats.length > most)) {
+      return this.error(seat, fewest === most ? `This game is for exactly ${fewest} players` : `This game is for ${fewest} to ${most} players`);
+    }
     this.seats.forEach(s => { s.left = false; });
     this.disposeMatches(); clearTimeout(this.timer);
     if (this.mode === 'league') return this.startLeague();

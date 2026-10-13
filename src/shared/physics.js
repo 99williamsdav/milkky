@@ -20,14 +20,15 @@ const MAX_SUBSTEPS = 8;
 
 const len = v => Math.hypot(v.x, v.y, v.z);
 
-// variant: which bottles are in play (the classic 12, or Milkkshake's 24). bodies: how many to make (the browser
-// makes 24 and switches between layouts with setLayout; spare bottles are kept out of play, off to one side).
-export function createPhysics(RAPIER, { variant = 'classic', bodies = 0 } = {}) {
+// variant (and players, for a Milkkshake): which bottles are in play (the classic 12, or a Milkkshake rack of up to
+// 48). bodies: how many to make (the browser makes 48 and switches between layouts with setLayout; spare bottles
+// are kept out of play, off to one side).
+export function createPhysics(RAPIER, { variant = 'classic', players = 2, bodies = 0 } = {}) {
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = 1 / 120;
   world.createCollider(RAPIER.ColliderDesc.cuboid(30, 0.5, 30).setTranslation(0, -0.5, 0).setFriction(0.8).setRestitution(0.1));
 
-  const count = Math.max(bodies, positionsFor(variant).length);
+  const count = Math.max(bodies, positionsFor(variant, players).length);
   const bottles = Array.from({ length: count }, (_, i) => {
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(0, BOTTLE_HALF + 0.0005, 0).setLinearDamping(0.3).setAngularDamping(0.8).setCanSleep(true));
@@ -36,13 +37,13 @@ export function createPhysics(RAPIER, { variant = 'classic', bodies = 0 } = {}) 
   });
   // Which bottles are in play and where they start: { num, home, flavour } for those in the layout, the rest stored
   let active = 0;
-  function setLayout(v) {
-    const spots = positionsFor(v);
+  function setLayout(v, n = 2) {
+    const spots = positionsFor(v, n);
     active = spots.length;
     bottles.forEach((b, i) => {
       const s = spots[i];
       Object.assign(b, s ? { num: s.num, homeX: s.x, homeZ: s.z, active: true, flavour: s.flavour || null }
-        : { num: i + 1, homeX: -22 - (i % 6) * 0.3, homeZ: 22 + Math.floor(i / 6) * 0.3, active: false, flavour: null });
+        : { num: 100 + i, homeX: -22 - (i % 8) * 0.3, homeZ: 22 + Math.floor(i / 8) * 0.3, active: false, flavour: null });
     });
     resetBottles();
     return active;
@@ -154,7 +155,7 @@ export function createPhysics(RAPIER, { variant = 'classic', bodies = 0 } = {}) 
   }
 
   const allBodies = () => stick ? [...bottles.map(b => b.body), stick] : bottles.map(b => b.body);
-  setLayout(variant);
+  setLayout(variant, players);
   const isMoving = () => allBodies().some(b => !b.isSleeping() && (len(b.linvel()) > 0.03 || len(b.angvel()) > 0.4));
   const fallenBottles = () => bottles.filter(b => b.active && b.body.translation().y < FALLEN_Y);
   // [{ bottle, x, z }] for the computer players' target choice

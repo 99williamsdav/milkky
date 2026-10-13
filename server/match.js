@@ -36,7 +36,7 @@ export class Match {
     this.variant = variant;
     this.room = room; this.id = id; this.seats = seats; this.onOver = onOver;
     this.pace = pace; this.turnTime = turnTime;
-    this.physics = createPhysics(room.RAPIER, { variant });
+    this.physics = createPhysics(room.RAPIER, { variant, players: seats.length });
     settle(this.physics);
     this.rng = mulberry32((Math.random() * 2 ** 32) >>> 0);
     this.game = {
@@ -206,7 +206,7 @@ export class Match {
     this.room.thrown?.(this, thrower, fallen, scoreBefore, own); // career stats
     game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]);
 
-    const plan = planRestand(physics.bottles.map(b => ({ t: b.body.translation(), q: b.body.rotation(), num: b.num })), this.rng, game);
+    const plan = planRestand(physics.bottles.map(b => ({ t: b.body.translation(), q: b.body.rotation(), num: b.num, active: b.active })), this.rng, game);
     physics.removeStick();
     const restand = [];
     physics.bottles.forEach((b, i) => {

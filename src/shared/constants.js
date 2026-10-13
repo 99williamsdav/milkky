@@ -33,19 +33,26 @@ export function homePositions() {
   return out;
 }
 
-// Milkkshake (milkshake.js): 12 strawberry and 12 blueberry bottles in clusters of three, two staggered rows of
-// four clusters, the flavours alternating like a chequerboard. Bottles 1–12 are strawberry, 13–24 blueberry.
-export const SHAKE_GAP = 0.34; // between cluster centres (closer means more risk of knocking the other flavour)
-export function shakePositions() {
-  const out = [], next = { strawberry: 1, blueberry: 13 };
-  for (let row = 0; row < 2; row++) {
-    for (let k = 0; k < 4; k++) {
-      const cx = (k - 1.5) * SHAKE_GAP + (row ? SHAKE_GAP / 2 : 0) - SHAKE_GAP / 4, cz = FRONT_Z - 0.2 - row * SHAKE_GAP * 0.87;
-      const flavour = (k + row) % 2 ? 'blueberry' : 'strawberry';
-      for (const [dx, dz] of [[0, D * 0.58], [-D / 2, -D * 0.29], [D / 2, -D * 0.29]]) out.push({ num: next[flavour]++, x: cx + dx, z: cz + dz, flavour });
-    }
-  }
+// Milkkshake (milkshake.js), for 2–4 players: each player's flavour of bottles in clusters of three, the clusters on
+// a staggered grid. Every flavour has the same share of front, back, centre and edge clusters (each row and column
+// of the grid holds each flavour equally often), so no flavour gets the easier ones:
+//   2 players: 4 rows of 2, 12 each   3 players: 3 rows of 3, 9 each   4 players: 4 rows of 4, 12 each
+// Grids are listed front row first; numbers are flavour indices (strawberry, blueberry, banana, chocolate).
+// Bottles are numbered in blocks of 12 per flavour: strawberry 1–12, blueberry 13–24, banana 25–36, chocolate 37–48.
+export const SHAKE_FLAVOURS = ['strawberry', 'blueberry', 'banana', 'chocolate'];
+export const SHAKE_GAP = 0.34; // between cluster centres (closer means more risk of knocking another flavour)
+const SHAKE_GRIDS = {
+  2: [[0, 1], [0, 1], [1, 0], [1, 0]], // (with the rows staggered, this gives each flavour two outer and two inner clusters)
+  3: [[0, 2, 1], [1, 0, 2], [2, 1, 0]],
+  4: [[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1], [3, 0, 1, 2]],
+};
+export function shakePositions(players = 2) {
+  const grid = SHAKE_GRIDS[players] || SHAKE_GRIDS[2], out = [], next = SHAKE_FLAVOURS.map((_, f) => f * 12 + 1);
+  grid.forEach((row, r) => row.forEach((f, k) => {
+    const cx = (k - (row.length - 1) / 2) * SHAKE_GAP + (r % 2 ? SHAKE_GAP / 4 : -SHAKE_GAP / 4), cz = FRONT_Z - 0.2 - r * SHAKE_GAP * 0.87;
+    for (const [dx, dz] of [[0, D * 0.58], [-D / 2, -D * 0.29], [D / 2, -D * 0.29]]) out.push({ num: next[f]++, x: cx + dx, z: cz + dz, flavour: SHAKE_FLAVOURS[f] });
+  }));
   return out;
 }
-// The bottles for a game's rules: the classic rack of 12, or Milkkshake's 24
-export const positionsFor = variant => (variant === 'milkshake' ? shakePositions() : homePositions());
+// The bottles for a game's rules: the classic rack of 12, or a Milkkshake rack for that many players
+export const positionsFor = (variant, players = 2) => (variant === 'milkshake' ? shakePositions(players) : homePositions());

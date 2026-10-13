@@ -99,12 +99,13 @@ export function chaseText(game) {
     : `Take ${L0.cleared + 1} to win`;
 }
 
-// Where bottles go after a throw (poses: [{ t, q, num }] in bottle order; base: the classic plan of who needs standing
+// Where bottles go after a throw (poses: [{ t, q, num, active }] in bottle order; base: the classic plan of who needs standing
 // up, from rules.js). Bottles taken out go to their parking spot; every bottle still in play that's outside the
 // area is put back on its edge. Returns [{ needs, x, z, gone }].
 export function battleRestand(poses, base, game) {
   const removed = new Set(game.battle.removed);
   const plan = base.map((p, i) => {
+    if (poses[i].active === false) return p; // a bottle not in play (the browser keeps spares off to one side)
     if (removed.has(poses[i].num)) return { needs: true, gone: true, ...parkSpot(i) };
     let { x, z, needs } = p;
     const dx = x - RELEASE.x, dz = z - RELEASE.z, d = Math.hypot(dx, dz), a = Math.atan2(dx, -dz);
@@ -113,7 +114,7 @@ export function battleRestand(poses, base, game) {
     return { needs, x, z };
   });
   // Two bottles put back on the same bit of edge: nudge them apart
-  const live = plan.filter(p => !p.gone), min = 2 * BOTTLE_R + 0.006;
+  const live = plan.filter((p, i) => !p.gone && poses[i].active !== false), min = 2 * BOTTLE_R + 0.006;
   for (let it = 0; it < 12; it++) {
     for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
       const A = live[i], B = live[j], d = Math.hypot(B.x - A.x, B.z - A.z);

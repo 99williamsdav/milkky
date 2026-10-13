@@ -39,9 +39,9 @@ function makeBottle(num) {
   return { model, milk, cap, band };
 }
 
-// ---------- Flavoured milk (Milkkshake): strawberry and blueberry ----------
-export const FLAVOUR_COLOURS = { strawberry: 0xf4a3bf, blueberry: 0xa9b7ee };
-export const FLAVOUR_CSS = { strawberry: '#e0789d', blueberry: '#6f84d8' };
+// ---------- Flavoured milk (Milkkshake): strawberry, blueberry, banana and chocolate ----------
+export const FLAVOUR_COLOURS = { strawberry: 0xf4a3bf, blueberry: 0xa9b7ee, banana: 0xf5dc78, chocolate: 0x9a6a4c };
+export const FLAVOUR_CSS = { strawberry: '#e0789d', blueberry: '#6f84d8', banana: '#cfa52a', chocolate: '#8a5a3c' };
 function flavourBand(colour) {
   const c = document.createElement('canvas'); c.width = 384; c.height = 80;
   const g = c.getContext('2d');

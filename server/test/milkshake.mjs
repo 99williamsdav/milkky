@@ -50,7 +50,7 @@ await A.next(is('joined'));
 A.send({ t: 'addCpu', level: 'medium' });
 A.send({ t: 'variant', variant: 'milkshake' });
 const lobby = await A.next(m => m.t === 'room' && m.variant === 'milkshake');
-check(lobby.maxSeats === 2, 'a Milkkshake room takes 2');
+check(lobby.maxSeats === 4, 'a Milkkshake room takes up to 4');
 let mine = null, players = [], ok = true, start = null;
 A.onMessage = m => {
   if (m.t === 'start') { mine = m.match; players = m.game.players.map(p => p.name); start = m; }
@@ -68,6 +68,57 @@ check(start.poses.length === 24 && start.game.shake, 'the game starts with 24 bo
 check(last.game.winner >= 0 || last.game.draw, 'it ends with a winner (or a draw)');
 check(ok, 'every bottle knocked over is parked, and only those');
 check(last.game.players.every((p, i) => p.score === 12 - (12 - s.removed.filter(n => flavourOf(n) === (i ? 'blueberry' : 'strawberry')).length)), 'scores are each flavour cleared');
+
+// ---------- 3 and 4 players ----------
+// Every rack is fair: each flavour has the same share of each row and the same average distance and sideways spread
+for (const n of [2, 3, 4]) {
+  const r = shakePositions(n), per = r.length / n, rows = [...new Set(r.map(p => p.z.toFixed(3)))];
+  const byF = f => r.filter(p => p.flavour === ['strawberry', 'blueberry', 'banana', 'chocolate'][f]);
+  const mean = (a, k) => a.reduce((t, p) => t + k(p), 0) / a.length, spread = a => Math.max(...a) - Math.min(...a);
+  const fair = [...Array(n).keys()].every(f => byF(f).length === per)
+    && spread([...Array(n).keys()].map(f => mean(byF(f), p => Math.hypot(p.x - RELEASE.x, p.z - RELEASE.z)))) < 0.02 // within 2 cm as far
+    && spread([...Array(n).keys()].map(f => mean(byF(f), p => Math.abs(p.x)))) < 0.12; // within 12 cm as central (3 players: the stagger)
+  check(fair, `${n} players: ${per} each in a rack of ${r.length}, every flavour as near and as central as the others`);
+}
+const many = n => { const h = { players: ['Ann', 'Bob', 'Cat', 'Dan'].slice(0, n).map(x => newPlayer(x, null, 'red')), target: 50, winner: null }; newShake(h, 0); return h; };
+g = many(3);
+scoreThrow(g, [1]); scoreThrow(g, []);
+check(g.cur === 1, '3 players: a miss passes the turn to the next player');
+scoreThrow(g, [13, 25]);
+check(g.cur === 2 && g.players[2].score === 1, 'knocking over another player’s bottles counts for them, and passes the turn');
+// Bob's throw clears Cat's last banana: Cat wins
+g = many(3); g.shake.removed = [25, 26, 27, 28, 29, 30, 31, 32]; g.cur = 1;
+scoreThrow(g, [33]);
+check(g.winner?.name === 'Cat', 'clearing someone else’s last bottle hands them the win');
+// Dan's throw clears Ann's and Bob's at once: a draw; with his own among them: Dan wins
+g = many(4); g.shake.removed = [...Array(11).keys()].map(k => k + 1).concat([...Array(11).keys()].map(k => k + 13)); g.cur = 3;
+scoreThrow(g, [12, 24]);
+check(g.draw && !g.winner, 'clearing two other flavours at once is a draw');
+g = many(4); g.shake.removed = [...Array(11).keys()].map(k => k + 1).concat([...Array(11).keys()].map(k => k + 37)); g.cur = 3;
+scoreThrow(g, [12, 48]);
+check(g.winner?.name === 'Dan', 'clearing several including your own: you win');
+
+// An online game for three
+const T = client(PORT, 'Tess');
+await T.open;
+T.send({ t: 'create', name: 'Tess' });
+await T.next(is('joined'));
+T.send({ t: 'variant', variant: 'milkshake' });
+T.send({ t: 'addCpu', level: 'medium' }); T.send({ t: 'addCpu', level: 'easy' });
+await T.next(m => m.t === 'room' && m.seats.length === 3 && m.variant === 'milkshake');
+let tm = null, tp = [], turns = new Set(), tok = true;
+T.onMessage = m => {
+  if (m.t === 'start') { tm = m.match; tp = m.game.players.map(p => p.name); }
+  if (m.t === 'turn' && m.match === tm) turns.add(m.cur);
+  if (m.t === 'turn' && m.match === tm && !m.cpu && tp[m.cur] === 'Tess') T.send({ t: 'throw', dist: 3.6 + Math.random() * 0.5, aim: (Math.random() - 0.5) * 0.2 });
+  if (m.t === 'throw' && m.match === tm) m.poses.forEach(([x, , z], i) => { if (m.game.shake.removed.includes(shakePositions(3)[i].num) !== isParked(x, z)) tok = false; });
+};
+T.send({ t: 'start' });
+const s3 = await T.next(m => m.t === 'start');
+const end3 = await T.next(m => m.t === 'throw' && m.over);
+console.log(`3 players: ${end3.game.shake.throws} throws; cleared ${end3.game.players.map(p => `${p.name} ${p.score}`).join(', ')}; ${end3.game.draw ? 'a draw' : `winner ${tp[end3.game.winner]}`}`);
+check(s3.poses.length === 27 && s3.game.shake.per === 9, 'a 3-player game starts with 27 bottles, 9 each');
+check(turns.size === 3 && tok && (end3.game.winner >= 0 || end3.game.draw), 'all three take turns, knocked-over bottles are parked, and it ends');
 
 // ---------- A Milkkshake career ----------
 const c = Career.newCareer({ people: ['@me'], variant: 'milkshake' });

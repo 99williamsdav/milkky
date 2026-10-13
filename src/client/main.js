@@ -6,7 +6,7 @@ import { createPhysics, launchSpeedFor } from '../shared/physics.js';
 import { createPlayers, newPlayer, scoreThrow, isGameOver, advanceTurn, planRestand, verb } from '../shared/rules.js';
 import { computeInfo, planCpuThrow, planBattleThrow, planShakeThrow } from '../shared/ai.js';
 import { newBattle, liveSpots, roleOf, chaseText, isParked, AREA, BATTLE_THROWS, BOTTLES } from '../shared/battle.js';
-import { newShake, flavourOfPlayer, leftFor, FLAVOURS, FLAVOUR_NAME, PER_FLAVOUR } from '../shared/milkshake.js';
+import { newShake, flavourOfPlayer, leftFor, FLAVOURS, FLAVOUR_NAME } from '../shared/milkshake.js';
 import { app, renderer, canvas, scene, camera } from './scene.js';
 import { decorateBottles, setBottleLook, FLAVOUR_CSS, stickMesh, hand, aimGeo, aimLine, landRing } from './models.js';
 import { clearMilk, updateMilk } from './milk.js';
@@ -34,7 +34,7 @@ try {
   throw err;
 }
 
-const physics = createPhysics(RAPIER, { bodies: 24 }); // enough for Milkkshake; the classic rack uses 12
+const physics = createPhysics(RAPIER, { bodies: 48 }); // enough for a 4-player Milkkshake; the classic rack uses 12
 const bottles = physics.bottles;
 decorateBottles(bottles);
 const HOME_C = new THREE.Vector3(0, 0, FRONT_Z - 1.5 * ROW);
@@ -49,14 +49,15 @@ const SLOT_LABEL = { human: 'Human', easy: 'Computer · Easy', medium: 'Computer
 let slots = ['human', 'medium'];
 let lastSetup = slots.slice();
 let chosenTarget = 50; // the score to hit exactly; going over drops you to half
-// The rules: classic, battle (Siege: shared/battle.js) or milkshake (Milkkshake: shared/milkshake.js), the last two
-// for two players
+// The rules: classic, battle (Siege: shared/battle.js, two players) or milkshake (Milkkshake: shared/milkshake.js, two
+// to four). Neither has a target score.
 let chosenVariant = 'classic';
-const TWO_PLAYER = v => v === 'battle' || v === 'milkshake';
+const NO_TARGET = v => v === 'battle' || v === 'milkshake';
+const PLAYERS = { classic: [1, 4], battle: [2, 2], milkshake: [2, 4] }; // a game's fewest and most players
 const VARIANT_NAME = { classic: 'Classic', battle: 'Siege', milkshake: 'Milkkshake' };
 const VARIANT_NOTE = {
   battle: 'Siege: one of you attacks while the other defends (scattering the bottles), then you swap. Clear all 12 in fewer throws to win.',
-  milkshake: 'Milkkshake: strawberry v blueberry, 12 bottles each. Anything knocked over is out. First to have their flavour cleared wins; hit only yours to throw again.',
+  milkshake: 'Milkkshake: for 2–4 players, each with a flavour (strawberry, blueberry, banana, chocolate). Anything knocked over is out. First to have their flavour cleared wins; hit only yours to throw again.',
 };
 let mode = 'quick', leagueMatch = null; // quick | league | online
 
@@ -81,8 +82,8 @@ function resetBottles() {
   for (const p of bottles) { p.label.material.color.set(0xffffff); p.mesh.visible = p.active; p.label.visible = p.active && !p.flavour; }
 }
 // Set the bottles up for a game's rules: the classic 12, or Milkkshake's 24 flavoured ones
-function useBottlesFor(variant) {
-  physics.setLayout(variant === 'milkshake' ? 'milkshake' : 'classic');
+function useBottlesFor(variant, players = 2) {
+  physics.setLayout(variant === 'milkshake' ? 'milkshake' : 'classic', players);
   for (const p of bottles) setBottleLook(p, p.active ? p.flavour : null);
   resetBottles();
 }
@@ -98,7 +99,7 @@ function gameWorm(g) {
   if (g.shake) { // each flavour cleared, after every throw (anyone's: knocking over theirs helps them)
     const series = g.players.map((p, i) => ({ name: `${p.name} (${FLAVOUR_NAME[FLAVOURS[i]].toLowerCase()})`, color: FLAVOUR_CSS[FLAVOURS[i]],
       points: g.shake.log.map(sc => ({ y: sc[i] })) }));
-    return g.shake.log.length ? wormHTML(series, { max: PER_FLAVOUR, target: PER_FLAVOUR, xLabel: 'Throws', yLabel: 'Cleared' }) : '';
+    return g.shake.log.length ? wormHTML(series, { max: g.shake.per, target: g.shake.per, xLabel: 'Throws', yLabel: 'Cleared' }) : '';
   }
   if (g.battle) { // bottles cleared after each attacking throw, for each attack
     const series = g.players.map((p, i) => ({ name: p.name, color: p.color,
@@ -110,7 +111,7 @@ function gameWorm(g) {
   return series.some(s => s.points.length) ? wormHTML(series, { max: g.target, target: g.target }) : '';
 }
 function launch(first) {
-  game.cur = first; game.winner = null; game.draw = false; game.log = []; physics.removeStick(); useBottlesFor(game.variant);
+  game.cur = first; game.winner = null; game.draw = false; game.log = []; physics.removeStick(); useBottlesFor(game.variant, game.players.length);
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
   game.battle = null; game.shake = null;
   if (game.variant === 'battle') {
@@ -120,8 +121,8 @@ function launch(first) {
   } else if (game.variant === 'milkshake') {
     newShake(game, first, { decisive: mode === 'league' }); // a career game needs a winner
     Achv.gameLeft();
-    const p = game.players[first];
-    toast(`Milkkshake! ${p.name} ${verb(p, 'is', 'are')} strawberry, ${game.players[1 - first].name} blueberry. Hit only yours to throw again.`, 3200, true);
+    const who = game.players.map((p, i) => `${p.name} ${FLAVOUR_NAME[FLAVOURS[i]].toLowerCase()}`).join(', ');
+    toast(`Milkkshake! ${who}. Hit only yours to throw again.`, 3200, true);
   } else Achv.gameStarted(game.players.map(p => !p.cpu)); // on this device, every person's throws count
   beginTurn();
 }
@@ -177,7 +178,7 @@ function renderShakeBoard() {
     return `<div class="chip ${now ? 'active' : ''}">
       <div class="nm">${p.bot ? faceSVG(p.bot, 18) : ''}<span class="sw" style="background:${FLAVOUR_CSS[f]}"></span>${esc(p.name)}${isMe(i) ? ' (you)' : ''}${p.left ? '<small>· computer</small>' : p.away ? '<small>· away</small>' : ''}</div>
       <div class="role" style="color:${FLAVOUR_CSS[f]}">${FLAVOUR_NAME[f]}</div>
-      <div class="sc">${p.score}<small>/${PER_FLAVOUR}</small></div>
+      <div class="sc">${p.score}<small>/${s.per}</small></div>
       <div class="tsub">${left} left${now && s.streak ? ' · again!' : ''}</div>
       <div class="cd"></div>
     </div>`;
@@ -319,7 +320,7 @@ function resolveThrow() {
 function startRestand() {
   physics.removeStick(); stickMesh.visible = false;
   physicsOn = false;
-  const poses = bottles.map(p => ({ t: p.body.translation(), q: p.body.rotation(), num: p.num }));
+  const poses = bottles.map(p => ({ t: p.body.translation(), q: p.body.rotation(), num: p.num, active: p.active }));
   const plan = mode === 'online' ? onlineRestandPlan() : planRestand(poses, Math.random, game);
   // Battle: bottles taken out of the game go straight to their parking spot, out of sight
   plan.forEach((pl, i) => {
@@ -357,7 +358,7 @@ function showOver() {
   state = 'over'; renderBoard();
   $('#overTitle').textContent = game.draw ? 'It\'s a draw!' : !winner ? 'Out after three misses' : isMe(game.players.indexOf(winner)) ? 'You win!' : `${winner.name} ${verb(winner, 'wins', 'win')}!`;
   if (game.shake) { // each flavour cleared
-    $('#standings').innerHTML = game.players.map((p, i) => `<li><span style="color:${FLAVOUR_CSS[flavourOfPlayer(i)]};font-weight:600">${esc(p.name)} · ${FLAVOUR_NAME[flavourOfPlayer(i)].toLowerCase()}${p === winner ? ' 🏆' : ''}</span><b>${p.score === PER_FLAVOUR ? 'all cleared' : `${p.score} of ${PER_FLAVOUR}`}</b></li>`).join('');
+    $('#standings').innerHTML = game.players.map((p, i) => `<li><span style="color:${FLAVOUR_CSS[flavourOfPlayer(i)]};font-weight:600">${esc(p.name)} · ${FLAVOUR_NAME[flavourOfPlayer(i)].toLowerCase()}${p === winner ? ' 🏆' : ''}</span><b>${p.score === game.shake.per ? 'all cleared' : `${p.score} of ${game.shake.per}`}</b></li>`).join('');
   } else if (game.battle) { // each attack: all cleared, and in how many throws, or how many
     const line = i => { const l = game.battle.legs.find(l => l.attacker === i); return l.cleared === BOTTLES ? `all ${BOTTLES} in ${l.throws}` : `${l.cleared} of ${BOTTLES}`; };
     $('#standings').innerHTML = game.players.map((p, i) => `<li><span style="color:${p.color};font-weight:600">${esc(p.name)}${p === winner ? ' 🏆' : ''}</span><b>${line(i)}</b></li>`).join('');
@@ -466,8 +467,8 @@ let newVariant = 'classic';
 function setNewVariant(v) {
   newVariant = v;
   $('#lgVariant').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v));
-  $('#lgLengthRow').hidden = TWO_PLAYER(v);
-  $('#lgLengthNote').textContent = TWO_PLAYER(v) ? `Every game is a ${VARIANT_NOTE[v]}` : LENGTH_NOTE[newLength];
+  $('#lgLengthRow').hidden = NO_TARGET(v);
+  $('#lgLengthNote').textContent = NO_TARGET(v) ? `Every game is a ${VARIANT_NOTE[v].replace('for 2–4 players', 'head to head')}` : LENGTH_NOTE[newLength];
 }
 function openNewLeague() {
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
@@ -809,7 +810,8 @@ function renderLobby() {
   const r = online.room;
   if (!r) return;
   const host = r.you === r.host, league = r.mode === 'league', career = r.mode === 'career', n = r.seats.length;
-  const battle = TWO_PLAYER(r.variant); // (Siege and Milkkshake: two players, no target)
+  const battle = NO_TARGET(r.variant); // (Siege and Milkkshake: no target)
+  const [fewest, most] = r.mode === 'game' ? PLAYERS[r.variant || 'classic'] : [career ? 1 : 2, 99];
   $('#lbVariant').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.v === (r.variant || 'classic')); b.disabled = !host; });
   ['#lbTargetLabel', '#lbTarget'].forEach(sel => $(sel).hidden = battle);
   $('#lbTitle').textContent = `Room ${r.code}`;
@@ -838,7 +840,7 @@ function renderLobby() {
   $('#lbAdd').hidden = !host || n >= r.maxSeats || career;
   $('#lbStart').hidden = !host;
   $('#lbStart').textContent = league ? 'Start league' : career ? 'Start career' : 'Start game';
-  $('#lbStart').disabled = n < (career ? 1 : 2) || (battle && r.mode === 'game' && n !== 2);
+  $('#lbStart').disabled = n < Math.max(fewest, career ? 1 : 2) || n > most;
   renderPush(); // (the pace may have changed)
   $('#lbWait').textContent = !host ? `Waiting for the host to start the ${league ? 'league' : career ? 'career' : 'game'}.`
     : career ? 'Start when you like. Anyone who joins later starts at the beginning of the next season.'
@@ -967,7 +969,7 @@ function onlineSync(m) {
   physics.removeStick();
   clearMilk(bottles); bottles.forEach(p => p.label.material.color.set(0xffffff));
   // The bottles for its rules, where the server has them, with any knocked out of the game hidden
-  if (physics.active !== m.poses.length || !!bottles[0].flavour !== !!m.game.shake) useBottlesFor(m.game.shake ? 'milkshake' : 'classic');
+  if (physics.active !== m.poses.length || !!bottles[0].flavour !== !!m.game.shake) useBottlesFor(m.game.shake ? 'milkshake' : 'classic', m.game.players.length);
   applyGame(m.game); snapPoses(m.poses); setStickHeld();
   resetVisibility(); if (game.battle || game.shake) syncBattleBottles();
   if (m.over) noteWorm(m.match);
@@ -1550,14 +1552,15 @@ $('#slots').addEventListener('click', e => {
   renderSlots();
 });
 renderSlots();
-// Classic, Siege or Milkkshake (the last two for two players, with no target)
+// Classic, Siege (two players) or Milkkshake (two to four); the last two have no target
 function setVariant(v) {
   chosenVariant = v;
+  const [fewest, most] = PLAYERS[v];
   $('#variantPick').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v));
-  $('#targetRow').hidden = TWO_PLAYER(v); $('#variantNote').hidden = !TWO_PLAYER(v);
+  $('#targetRow').hidden = NO_TARGET(v); $('#variantNote').hidden = !NO_TARGET(v);
   $('#variantNote').textContent = VARIANT_NOTE[v] || '';
-  $('#count').querySelectorAll('button').forEach(b => { b.disabled = TWO_PLAYER(v) && +b.dataset.n !== 2; });
-  if (TWO_PLAYER(v) && slots.length !== 2) { slots.length = Math.min(slots.length, 2); while (slots.length < 2) slots.push('medium'); renderSlots(); }
+  $('#count').querySelectorAll('button').forEach(b => { b.disabled = +b.dataset.n < fewest || +b.dataset.n > most; });
+  if (slots.length < fewest || slots.length > most) { slots.length = Math.min(slots.length, most); while (slots.length < fewest) slots.push('medium'); renderSlots(); }
 }
 $('#variantPick').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (b) setVariant(b.dataset.v); });
 $('#targetPick').addEventListener('click', e => {
