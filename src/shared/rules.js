@@ -1,9 +1,10 @@
 // Game rules: players, scoring, turn order and re-standing fallen bottles.
-// A game is a plain object: { players, cur, target, winner }, plus `battle` for a battle (battle.js), whose own
-// rules take over scoring, turns and re-standing.
+// A game is a plain object: { players, cur, target, winner }, plus `battle` for a Siege (battle.js) or `shake`
+// for a Milkkshake (milkshake.js), whose own rules take over scoring, turns and re-standing (and `draw`).
 import { BOTTLE_R, BOTTLE_HALF, COLORS, upY, upVector } from './constants.js';
 import { LEVELS } from './ai.js';
 import { battleThrow, battleRestand } from './battle.js';
+import { shakeThrow, shakeRestand } from './milkshake.js';
 
 export const MAX_MISSES = 3;
 export const half = target => target / 2;
@@ -30,6 +31,7 @@ export function createPlayers(types) {
 // Updates scores, misses and the winner; returns the message to show.
 export function scoreThrow(game, fallenNums) {
   if (game.battle) return battleThrow(game, fallenNums); // (which also moves the turn on)
+  if (game.shake) return shakeThrow(game, fallenNums);
   const p = game.players[game.cur], target = game.target;
   let msg;
   if (fallenNums.length === 0) {
@@ -48,10 +50,10 @@ export function scoreThrow(game, fallenNums) {
   return msg;
 }
 
-export const isGameOver = game => !!game.winner || game.players.every(q => q.out);
+export const isGameOver = game => !!game.winner || !!game.draw || game.players.every(q => q.out);
 
 export function advanceTurn(game) {
-  if (game.battle) return; // a battle's turns move on as each throw is scored
+  if (game.battle || game.shake) return; // their turns move on as each throw is scored
   do { game.cur = (game.cur + 1) % game.players.length; } while (game.players[game.cur].out);
 }
 
@@ -81,5 +83,5 @@ export function planRestand(poses, rng = Math.random, game = null) {
       else { B.x += nx * push; B.z += nz * push; }
     }
   }
-  return game?.battle ? battleRestand(poses, items, game) : items;
+  return game?.battle ? battleRestand(poses, items, game) : game?.shake ? shakeRestand(poses, items, game) : items;
 }

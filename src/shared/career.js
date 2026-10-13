@@ -9,7 +9,7 @@
 // A season is a calendar of steps (STEPS): the 7 league rounds, with the cup's 5 rounds slotted in between. Play a
 // step with playStep(), passing the results of the games people played. When the season is over (seasonOver()),
 // nextSeason() moves everyone up and down and starts the next one.
-import { aiFromSkill, simulateGame, simulateBattle } from './ai.js';
+import { aiFromSkill, simulateGame, simulateBattle, simulateShake } from './ai.js';
 import { roundRobin, peopleLast } from './schedule.js';
 import { ROSTER, botById, startingTiers, TIERS } from './roster.js';
 
@@ -41,7 +41,7 @@ const draw = (ids, rng) => { const list = shuffle([...ids], rng), ties = []; for
 
 // ---------- Starting out ----------
 // people: person ids. target: what each game is played to (20, 30 or 50).
-// variant: 'classic', or 'battle' (every game is a battle: shared/battle.js)
+// variant: 'classic', 'battle' (every game a Siege: shared/battle.js) or 'milkshake' (a Milkkshake: shared/milkshake.js)
 export function newCareer({ people = ['@you'], target = 50, variant = 'classic', rng = Math.random } = {}) {
   const c = { season: 1, target, variant, tiers: startingTiers(), promotedIn: {}, waiting: [], summary: null };
   for (const id of people) addPerson(c.tiers, id);
@@ -127,7 +127,9 @@ export function cupStatus(c, id) {
 // ---------- Playing ----------
 // A game between a and b worked out without playing it: { sa, sb, aWon }
 export function simulate(c, a, b, rng = Math.random) {
-  const res = c.variant === 'battle' ? simulateBattle(entryFor(a), entryFor(b), rng() < 0.5 ? 0 : 1, rng)
+  const first = rng() < 0.5 ? 0 : 1;
+  const res = c.variant === 'battle' ? simulateBattle(entryFor(a), entryFor(b), first, rng)
+    : c.variant === 'milkshake' ? simulateShake(entryFor(a), entryFor(b), first, rng)
     : simulateGame(entryFor(a), entryFor(b), rng() < 0.5 ? 0 : 1, c.target, rng);
   return { sa: res.scores[0], sb: res.scores[1], aWon: res.winner === 0 };
 }

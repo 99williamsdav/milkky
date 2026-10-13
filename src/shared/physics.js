@@ -1,7 +1,7 @@
 // The physics world: ground, bottles, stick and the grass friction model.
 // Rapier is passed in so the browser can load it from a CDN and the server from npm.
 import {
-  BOTTLE_R, BOTTLE_H, BOTTLE_HALF, STICK_R, STICK_HALF, DENSITY, RELEASE, ELEV, FALLEN_Y, homePositions, upY,
+  BOTTLE_R, BOTTLE_H, BOTTLE_HALF, STICK_R, STICK_HALF, DENSITY, RELEASE, ELEV, FALLEN_Y, positionsFor, upY,
 } from './constants.js';
 
 // Launch speed needed to travel `dist` metres and arrive at mid-bottle height, at the fixed release angle.
@@ -20,17 +20,33 @@ const MAX_SUBSTEPS = 8;
 
 const len = v => Math.hypot(v.x, v.y, v.z);
 
-export function createPhysics(RAPIER) {
+// variant: which bottles are in play (the classic 12, or Milkkshake's 24). bodies: how many to make (the browser
+// makes 24 and switches between layouts with setLayout; spare bottles are kept out of play, off to one side).
+export function createPhysics(RAPIER, { variant = 'classic', bodies = 0 } = {}) {
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = 1 / 120;
   world.createCollider(RAPIER.ColliderDesc.cuboid(30, 0.5, 30).setTranslation(0, -0.5, 0).setFriction(0.8).setRestitution(0.1));
 
-  const bottles = homePositions().map(({ num, x, z }) => {
+  const count = Math.max(bodies, positionsFor(variant).length);
+  const bottles = Array.from({ length: count }, (_, i) => {
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(x, BOTTLE_HALF + 0.0005, z).setLinearDamping(0.3).setAngularDamping(0.8).setCanSleep(true));
+      .setTranslation(0, BOTTLE_HALF + 0.0005, 0).setLinearDamping(0.3).setAngularDamping(0.8).setCanSleep(true));
     const collider = world.createCollider(RAPIER.ColliderDesc.cylinder(BOTTLE_HALF, BOTTLE_R).setDensity(DENSITY).setFriction(0.55).setRestitution(0.15), body);
-    return { num, body, collider, homeX: x, homeZ: z };
+    return { num: i + 1, body, collider, homeX: 0, homeZ: 0, active: false, flavour: null };
   });
+  // Which bottles are in play and where they start: { num, home, flavour } for those in the layout, the rest stored
+  let active = 0;
+  function setLayout(v) {
+    const spots = positionsFor(v);
+    active = spots.length;
+    bottles.forEach((b, i) => {
+      const s = spots[i];
+      Object.assign(b, s ? { num: s.num, homeX: s.x, homeZ: s.z, active: true, flavour: s.flavour || null }
+        : { num: i + 1, homeX: -22 - (i % 6) * 0.3, homeZ: 22 + Math.floor(i / 6) * 0.3, active: false, flavour: null });
+    });
+    resetBottles();
+    return active;
+  }
 
   let stick = null, stickCollider = null, acc = 0;
   // The first bottle the stick touched on this throw, and whether it was on its top: { num, top } (or null)
@@ -138,15 +154,18 @@ export function createPhysics(RAPIER) {
   }
 
   const allBodies = () => stick ? [...bottles.map(b => b.body), stick] : bottles.map(b => b.body);
+  setLayout(variant);
   const isMoving = () => allBodies().some(b => !b.isSleeping() && (len(b.linvel()) > 0.03 || len(b.angvel()) > 0.4));
-  const fallenBottles = () => bottles.filter(b => b.body.translation().y < FALLEN_Y);
+  const fallenBottles = () => bottles.filter(b => b.active && b.body.translation().y < FALLEN_Y);
   // [{ bottle, x, z }] for the computer players' target choice
-  const bottleSpots = () => bottles.map(b => { const t = b.body.translation(); return { bottle: b, x: t.x, z: t.z }; });
+  const bottleSpots = () => bottles.filter(b => b.active).map(b => { const t = b.body.translation(); return { bottle: b, x: t.x, z: t.z }; });
 
   return {
     world, bottles,
     get stick() { return stick; },
     get firstHit() { return firstHit; },
+    get active() { return active; }, // bottles in play: they come first in `bottles`
+    setLayout,
     get needle() { return needle; },
     placeUpright, resetBottles, throwStick, removeStick, advance, isMoving, fallenBottles, bottleSpots,
   };

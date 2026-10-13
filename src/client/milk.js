@@ -23,6 +23,7 @@ function spill(p) {
   g.rotation.y = -Math.atan2(dir.y, dir.x);
   for (let i = 0; i < 3; i++) {
     const b = new THREE.Mesh(puddleGeo, puddleMat.clone()); b.rotation.x = -Math.PI / 2;
+    b.material.color.copy(p.milk.material.color).lerp(puddleMat.color, 0.15); // the milk's own colour (flavours too)
     b.position.set((i - 1) * 0.05 + (Math.random() - 0.5) * 0.03, 0, (Math.random() - 0.5) * 0.05);
     b.userData.s = 0.06 + Math.random() * 0.05; b.scale.setScalar(0.001); g.add(b);
   }
@@ -54,7 +55,7 @@ export function updateMilk(dt, bottles, spilling) {
     upVec.set(0, 1, 0).applyQuaternion(qTmp.set(r.x, r.y, r.z, r.w));
     for (let k = 0; k < 3; k++) {
       const d = drops.find(q => q.life <= 0); if (!d) break;
-      d.life = 1.6; d.ground = false; d.m.visible = true; d.m.scale.setScalar(0.7 + Math.random() * 0.8);
+      d.life = 1.6; d.ground = false; d.m.visible = true; d.m.scale.setScalar(0.7 + Math.random() * 0.8); d.m.material = e.p.milk.material;
       d.m.position.set(t.x + upVec.x * BOTTLE_HALF, t.y + upVec.y * BOTTLE_HALF, t.z + upVec.z * BOTTLE_HALF);
       d.v.set(upVec.x * 0.5 + (Math.random() - 0.5) * 0.3 + lv.x, 0.2 + Math.random() * 0.4 + lv.y * 0.5, upVec.z * 0.5 + (Math.random() - 0.5) * 0.3 + lv.z);
     }

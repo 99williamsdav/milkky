@@ -36,17 +36,41 @@ function makeBottle(num) {
   const cap = new THREE.Mesh(capGeo, capMat); cap.position.y = 0.0755; cap.castShadow = true; model.add(cap);
   const band = new THREE.Mesh(bandGeo, new THREE.MeshStandardMaterial({ map: bottleLabel(num), roughness: 0.6 }));
   band.position.y = -0.028; band.castShadow = true; model.add(band);
-  return { model, milk };
+  return { model, milk, cap, band };
+}
+
+// ---------- Flavoured milk (Milkkshake): strawberry and blueberry ----------
+export const FLAVOUR_COLOURS = { strawberry: 0xf4a3bf, blueberry: 0xa9b7ee };
+export const FLAVOUR_CSS = { strawberry: '#e0789d', blueberry: '#6f84d8' };
+function flavourBand(colour) {
+  const c = document.createElement('canvas'); c.width = 384; c.height = 80;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fbf6ea'; g.fillRect(0, 0, 384, 80);
+  g.fillStyle = colour; g.fillRect(0, 0, 384, 12); g.fillRect(0, 68, 384, 12);
+  for (const x of [64, 192, 320]) { g.beginPath(); g.arc(x, 40, 16, 0, Math.PI * 2); g.fill(); } // a berry on each side
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const looks = Object.fromEntries(Object.entries(FLAVOUR_COLOURS).map(([f, colour]) => [f, {
+  milk: new THREE.MeshStandardMaterial({ color: colour, roughness: 0.45 }),
+  cap: new THREE.MeshStandardMaterial({ color: colour, metalness: 0.5, roughness: 0.35 }),
+  band: new THREE.MeshStandardMaterial({ map: flavourBand(FLAVOUR_CSS[f]), roughness: 0.6 }),
+}]));
+// A bottle as plain milk (flavour null) or a flavour
+export function setBottleLook(p, flavour) {
+  const l = flavour && looks[flavour];
+  p.milk.material = l ? l.milk : milkMat;
+  p.cap.material = l ? l.cap : capMat;
+  p.band.material = l ? l.band : p.plainBand;
 }
 
 // Adds meshes to the physics bottles: { num, body } → { num, body, mesh, model, milk, spilled, label }
 export function decorateBottles(bottles) {
   for (const p of bottles) {
     const mesh = new THREE.Group(); scene.add(mesh);
-    const { model, milk } = makeBottle(p.num); mesh.add(model);
+    const { model, milk, cap, band } = makeBottle(p.num); mesh.add(model);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: badgeTexture(p.num), depthWrite: false, transparent: true }));
     label.scale.set(0.09, 0.09, 1); scene.add(label);
-    Object.assign(p, { mesh, model, milk, spilled: false, label });
+    Object.assign(p, { mesh, model, milk, cap, band, plainBand: band.material, spilled: false, label });
   }
 }
 

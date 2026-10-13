@@ -22,7 +22,10 @@ import * as push from './push.js';
 const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[name] : fallback);
 export const MAX_SEATS = { game: 4, league: 8, career: 16 };
 const TARGETS = [20, 30, 50];
-const VARIANTS = ['classic', 'battle']; // the rules: the classic game, or a battle (shared/battle.js: two players)
+// The rules: the classic game, Siege ('battle': shared/battle.js) or Milkkshake ('milkshake': shared/milkshake.js),
+// the last two for two players
+const VARIANTS = ['classic', 'battle', 'milkshake'];
+const TWO_PLAYER = v => v === 'battle' || v === 'milkshake';
 const PACES = ['live', 'async'];
 const CPU_LEVELS = Object.keys(LEVELS);
 const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
@@ -79,8 +82,8 @@ export class Room {
   get hasPeople() { return this.seats.some(s => !s.cpu); }
   // A career takes people at any time (they wait for the next season)
   canJoin() { return (!this.inProgress || this.mode === 'career') && this.seats.length < this.maxSeats(); }
-  // A single battle is for two; otherwise as many as the game type allows
-  maxSeats(mode = this.mode) { return mode === 'game' && this.variant === 'battle' ? 2 : MAX_SEATS[mode]; }
+  // A single Siege or Milkkshake is for two; otherwise as many as the game type allows
+  maxSeats(mode = this.mode) { return mode === 'game' && TWO_PLAYER(this.variant) ? 2 : MAX_SEATS[mode]; }
   uniqueName(name) {
     let n = name, k = 2;
     while (this.seats.some(s => s.name === n)) n = `${name} ${k++}`;
@@ -267,7 +270,7 @@ export class Room {
       case 'mode':
         if (lobbyOnly('change the game type')) return;
         if (!(m.mode in MAX_SEATS)) return this.error(seat, 'Unknown game type');
-        if (this.seats.length > this.maxSeats(m.mode)) return this.error(seat, `A single ${this.variant === 'battle' ? 'battle' : 'game'} is for up to ${this.maxSeats(m.mode)} players`);
+        if (this.seats.length > this.maxSeats(m.mode)) return this.error(seat, `A single ${TWO_PLAYER(this.variant) ? 'game of these rules' : 'game'} is for up to ${this.maxSeats(m.mode)} players`);
         this.mode = m.mode;
         // A career is played at leisure, against its own bots
         if (m.mode === 'career') { this.pace = 'async'; this.seats.filter(s => s.cpu).forEach(s => this.removeSeat(s)); }
@@ -280,7 +283,7 @@ export class Room {
       case 'variant':
         if (lobbyOnly('change the rules')) return;
         if (!VARIANTS.includes(m.variant)) return this.error(seat, 'Unknown rules');
-        if (m.variant === 'battle' && this.mode === 'game' && this.seats.length > 2) return this.error(seat, 'A battle is for 2 players: remove some first');
+        if (TWO_PLAYER(m.variant) && this.mode === 'game' && this.seats.length > 2) return this.error(seat, 'That game is for 2 players: remove some first');
         this.variant = m.variant; return this.broadcastRoom();
       case 'target':
         if (lobbyOnly('change the target')) return;
@@ -290,7 +293,7 @@ export class Room {
         if (lobbyOnly('add players')) return;
         if (!CPU_LEVELS.includes(m.level)) return this.error(seat, 'Unknown level');
         if (this.mode === 'career') return this.error(seat, 'A career brings its own computer players');
-        if (this.seats.length >= this.maxSeats()) return this.error(seat, this.variant === 'battle' && this.mode === 'game' ? 'A battle is for 2 players' : 'The room is full');
+        if (this.seats.length >= this.maxSeats()) return this.error(seat, TWO_PLAYER(this.variant) && this.mode === 'game' ? 'This game is for 2 players' : 'The room is full');
         this.seats.push(this.newBot(m.level));
         return this.broadcastRoom();
       case 'removeCpu': {
@@ -342,12 +345,13 @@ export class Room {
   // ---------- Game flow ----------
   matchOptions() {
     // Live: a short turn timer. Async single game: a long one. Async league or career: none, the round deadline covers it.
-    return { target: this.target, pace: this.pace, turnTime: !this.async ? TURN_TIME : this.mode === 'game' ? ASYNC_TURN_TIME : null, variant: this.variant };
+    return { target: this.target, pace: this.pace, turnTime: !this.async ? TURN_TIME : this.mode === 'game' ? ASYNC_TURN_TIME : null, variant: this.variant,
+      decisive: this.mode !== 'game' }; // (leagues and careers need a winner)
   }
   start(seat) {
     this.dropAbsentSeats(); // anyone who left (or, live, isn't here) doesn't play
     if (this.mode === 'league' && this.seats.length < 2) return this.error(seat, 'A league needs at least 2 players');
-    if (this.mode === 'game' && this.variant === 'battle' && this.seats.length !== 2) return this.error(seat, 'A battle is for exactly 2 players');
+    if (this.mode === 'game' && TWO_PLAYER(this.variant) && this.seats.length !== 2) return this.error(seat, 'This game is for exactly 2 players');
     this.seats.forEach(s => { s.left = false; });
     this.disposeMatches(); clearTimeout(this.timer);
     if (this.mode === 'league') return this.startLeague();
@@ -491,7 +495,7 @@ export class Room {
       if (!seat.pid) return;
       const other = m.seats[1 - i], me = m.game.players[i], them = m.game.players[1 - i];
       Stats.recordGame(this.statsFor(seat.pid), m.tally?.[i] || Stats.newTally(),
-        { won: i === 0 ? aWon : !aWon, cup, opp: other.pid || other.bot, youOut: me.out, theyOut: them.out, battle: !!m.game.battle });
+        { won: i === 0 ? aWon : !aWon, cup, opp: other.pid || other.bot, youOut: me.out, theyOut: them.out, battle: !!(m.game.battle || m.game.shake) });
     });
     if (this.matches.every(x => x.over)) return this.endStep();
     this.broadcastRoom();
@@ -502,7 +506,7 @@ export class Room {
   }
   // A throw in a career game (called by the match): it counts for a person's stats if they threw it themselves
   thrown(m, i, fallen, scoreBefore, own) {
-    if (this.mode !== 'career' || !own || !m.seats[i].pid || m.game.battle) return;
+    if (this.mode !== 'career' || !own || !m.seats[i].pid || m.game.battle || m.game.shake) return;
     m.tally ||= {};
     Stats.recordThrow(m.tally[i] ||= Stats.newTally(), fallen, scoreBefore, m.game.target);
   }

@@ -1,5 +1,5 @@
 // Computer players: target choice, throwing error, and the quick bot-vs-bot simulation.
-import { RELEASE, AIM_LIMIT, MIN_DIST, MAX_DIST, clamp, homePositions } from './constants.js';
+import { RELEASE, AIM_LIMIT, MIN_DIST, MAX_DIST, clamp, homePositions, shakePositions } from './constants.js';
 import { gauss } from './rng.js';
 import { BATTLE_THROWS, BOTTLES, AREA, battleWinner } from './battle.js';
 
@@ -184,4 +184,56 @@ export function simulateBattle(A, B, first, rng = Math.random) {
   });
   const w = battleWinner(legs), byPlayer = [0, 1].map(i => legs.find(l => l.attacker === i).cleared);
   return { winner: w, scores: byPlayer };
+}
+
+// ---------- Milkkshake (milkshake.js) ----------
+// Aim where the expected result is best: your flavour knocked over minus theirs (each of theirs helps them), plus
+// a little for a clean hit, which means another throw. info: the bottles in play (computeInfo), with flavours.
+function shakeTarget(info, flavour, ai, rng) {
+  let tgt = info[0], best = -Infinity;
+  for (const c of info) {
+    let u = 0;
+    for (let k = 0; k < 40; k++) {
+      const { hits } = throwOutcome(c, info, ai, rng);
+      const own = hits.filter(h => h.bottle.flavour === flavour).length, theirs = hits.length - own;
+      u += own - theirs + (own && !theirs ? 0.5 : 0);
+    }
+    if (u > best) { best = u; tgt = c; }
+  }
+  return tgt;
+}
+export function planShakeThrow(pl, info, flavour, rng = Math.random) {
+  const tgt = shakeTarget(info, flavour, pl.ai, rng), lvl = pl.ai;
+  const dx = tgt.x - RELEASE.x, dz = tgt.z - RELEASE.z;
+  const aim = clamp(Math.atan2(dx, -dz), -AIM_LIMIT, AIM_LIMIT);
+  return { aim, target: tgt.bottle.num,
+    thrownAim: clamp(aim + gauss(rng) * lvl.aimSd, -AIM_LIMIT, AIM_LIMIT),
+    thrownDist: clamp(Math.hypot(dx, dz) * (1 + gauss(rng) * lvl.distSd), MIN_DIST, MAX_DIST) };
+}
+// A whole Milkkshake between bots, without the physics (for careers' background games): { winner, scores }.
+// A throw clearing both flavours goes to the thrower (careers need a winner).
+export function simulateShake(A, B, first, rng = Math.random) {
+  const ais = [A.ai, B.ai], flavours = ['strawberry', 'blueberry'];
+  let field = shakePositions().map(({ num, x, z, flavour }) => ({ bottle: { num, flavour }, x, z }));
+  const left = f => field.filter(q => q.bottle.flavour === f).length;
+  let cur = first, squeeze = false;
+  for (let n = 0; n < 300; n++) {
+    const info = computeInfo(field), mine = flavours[cur];
+    const { hits } = throwOutcome(shakeTarget(info, mine, ais[cur], rng), info, ais[cur], rng);
+    field = field.filter(q => !hits.some(h => h.bottle.num === q.bottle.num));
+    const own = hits.filter(h => h.bottle.flavour === mine).length, theirs = hits.length - own;
+    if (!left(mine) || !left(flavours[1 - cur])) {
+      const w = !left(mine) ? cur : 1 - cur;
+      return { winner: w, scores: flavours.map(f => 12 - left(f)) };
+    }
+    if (left(mine) === 1 || left(flavours[1 - cur]) === 1) squeeze = true;
+    if (own && !theirs) continue;
+    cur = 1 - cur;
+    if (squeeze) for (const q of field) {
+      const dx = q.x - RELEASE.x, dz = q.z - RELEASE.z, d = Math.hypot(dx, dz), nd = Math.max(1.5, d - 0.5);
+      q.x = RELEASE.x + dx / d * nd; q.z = RELEASE.z + dz / d * nd;
+    }
+  }
+  const scores = flavours.map(f => 12 - left(f));
+  return { winner: scores[0] >= scores[1] ? 0 : 1, scores };
 }

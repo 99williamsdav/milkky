@@ -32,3 +32,20 @@ export function homePositions() {
     out.push({ num, x: (j - (row.length - 1) / 2) * D, z: FRONT_Z - (LAYOUT.length - 1 - ri) * ROW })));
   return out;
 }
+
+// Milkkshake (milkshake.js): 12 strawberry and 12 blueberry bottles in clusters of three, two staggered rows of
+// four clusters, the flavours alternating like a chequerboard. Bottles 1–12 are strawberry, 13–24 blueberry.
+export const SHAKE_GAP = 0.34; // between cluster centres (closer means more risk of knocking the other flavour)
+export function shakePositions() {
+  const out = [], next = { strawberry: 1, blueberry: 13 };
+  for (let row = 0; row < 2; row++) {
+    for (let k = 0; k < 4; k++) {
+      const cx = (k - 1.5) * SHAKE_GAP + (row ? SHAKE_GAP / 2 : 0) - SHAKE_GAP / 4, cz = FRONT_Z - 0.2 - row * SHAKE_GAP * 0.87;
+      const flavour = (k + row) % 2 ? 'blueberry' : 'strawberry';
+      for (const [dx, dz] of [[0, D * 0.58], [-D / 2, -D * 0.29], [D / 2, -D * 0.29]]) out.push({ num: next[flavour]++, x: cx + dx, z: cz + dz, flavour });
+    }
+  }
+  return out;
+}
+// The bottles for a game's rules: the classic rack of 12, or Milkkshake's 24
+export const positionsFor = variant => (variant === 'milkshake' ? shakePositions() : homePositions());

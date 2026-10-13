@@ -349,8 +349,8 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <h1>Milkky</h1>
       <p class="sub">Knock the numbered bottles. First to hit the target score exactly wins.</p>
       <div style="font-weight:600">Game</div>
-      <div class="count" id="variantPick"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Battle</button></div>
-      <p class="note" id="variantNote" hidden>One of you attacks, the other defends, then you swap. Clear all 12 bottles in fewer throws to win.</p>
+      <div class="count" id="variantPick"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Siege</button><button data-v="milkshake">Milkkshake</button></div>
+      <p class="note" id="variantNote" hidden></p>
       <div id="targetRow"><div style="font-weight:600">Play to</div>
       <div class="count" id="targetPick"><button data-t="20">20</button><button data-t="30">30</button><button data-t="50" aria-pressed="true">50</button></div></div>
       <div style="font-weight:600">Players</div>
@@ -374,7 +374,9 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <li>Reach the target <b>exactly</b> to win (50 in the official game, or 30 or 20 for a shorter one). Go over and you drop to half the target: 25, 15 or 10.</li>
         <li>Three misses in a row and you're out.</li>
       </ul>
-      <p><b>Battle:</b> a game for two, in two legs. One of you attacks and the other defends, taking turns (attacker first) at the same bottles. Bottles the attacker knocks down are out of the game; bottles the defender knocks down are stood up where they land, so the defender's job is to scatter them. The attacker has 20 throws to clear all 12, then you swap. Whoever clears them in fewer throws wins (or, if neither does, whoever cleared more). Bottles knocked outside the marked area are put back on its edge.</p>
+      <p><b>Battle modes</b>, for two players:</p>
+      <p><b>Siege:</b> a game in two legs. One of you attacks and the other defends, taking turns (attacker first) at the same bottles. Bottles the attacker knocks down are out of the game; bottles the defender knocks down are stood up where they land, so the defender's job is to scatter them. The attacker has 20 throws to clear all 12, then you swap. Whoever clears them in fewer throws wins (or, if neither does, whoever cleared more). Bottles knocked outside the marked area are put back on its edge.</p>
+      <p><b>Milkkshake:</b> 12 strawberry and 12 blueberry bottles, in little clusters. You're strawberry if you throw first. Anything knocked over is out of the game, whoever's it is, and the first flavour to be cleared wins, so knocking over your opponent's bottles helps them. Hit only your own and you throw again. Once someone is down to their last bottle, everything left moves closer each turn. Clear both at once and it's a draw.</p>
       <p><b>Throwing:</b> the stick is thrown underhand and upright. Press and drag down to swing back, then flick up and let go. A faster flick throws further. Where you press left or right of centre sets your aim.</p>
       <button class="primary" id="rulesClose">Got it</button>
     </div>
@@ -422,7 +424,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <h2>New career</h2>
       <p class="sub">Start in the Sunday League and work your way up to the Premier League. Each season the top 2 go up and the bottom 2 go down.</p>
       <div style="font-weight:600">Game</div>
-      <div class="count" id="lgVariant"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Battle</button></div>
+      <div class="count" id="lgVariant"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Siege</button><button data-v="milkshake">Milkkshake</button></div>
       <div id="lgLengthRow"><div style="font-weight:600">Game length</div>
       <div class="count" id="lgLength"><button data-t="20">20<small>Quick</small></button><button data-t="30">30<small>Standard</small></button><button data-t="50">50<small>Full</small></button></div></div>
       <p class="note" id="lgLengthNote"></p>
@@ -483,7 +485,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div class="count" id="lbMode"><button data-mode="game">Single game</button><button data-mode="league">League</button><button data-mode="career">Career</button></div>
       <p class="note" id="lbModeNote"></p>
       <div style="font-weight:600">Rules</div>
-      <div class="count" id="lbVariant"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Battle</button></div>
+      <div class="count" id="lbVariant"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Siege</button><button data-v="milkshake">Milkkshake</button></div>
       <div style="font-weight:600" id="lbPaceLabel">Pace</div>
       <div class="count" id="lbPace"><button data-pace="live">Live</button><button data-pace="async">Take your time</button></div>
       <p class="note" id="lbPaceNote"></p>

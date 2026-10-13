@@ -7,8 +7,9 @@
 // can watch what they missed, and turns only run out after a long limit (or the league round's deadline).
 import { createPhysics } from '../src/shared/physics.js';
 import { newPlayer, scoreThrow, isGameOver, advanceTurn, planRestand } from '../src/shared/rules.js';
-import { LEVELS, computeInfo, planCpuThrow, planBattleThrow } from '../src/shared/ai.js';
+import { LEVELS, computeInfo, planCpuThrow, planBattleThrow, planShakeThrow } from '../src/shared/ai.js';
 import { newBattle, liveSpots, roleOf } from '../src/shared/battle.js';
+import { newShake, flavourOfPlayer } from '../src/shared/milkshake.js';
 import { COLORS, AIM_LIMIT, MIN_DIST, MAX_DIST, clamp } from '../src/shared/constants.js';
 import { mulberry32 } from '../src/shared/rng.js';
 import { simulateThrow, snapshot, settle } from './sim.js';
@@ -29,11 +30,13 @@ const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 export class Match {
   // seats: the players, in seat order. first: index of who throws first. onOver(match) when it ends.
   // turnTime: ms a person has for a turn before a bot plays it (null: no limit).
-  // variant: 'classic', or 'battle' (two players: shared/battle.js)
-  constructor(room, id, seats, { target, first = 0, onOver = () => {}, pace = 'live', turnTime = TURN_TIME, variant = 'classic' }) {
+  // variant: 'classic', 'battle' (Siege: shared/battle.js) or 'milkshake' (Milkkshake: shared/milkshake.js), both for
+  // two players. decisive: a Milkkshake can't be drawn (leagues and careers need a winner).
+  constructor(room, id, seats, { target, first = 0, onOver = () => {}, pace = 'live', turnTime = TURN_TIME, variant = 'classic', decisive = false }) {
+    this.variant = variant;
     this.room = room; this.id = id; this.seats = seats; this.onOver = onOver;
     this.pace = pace; this.turnTime = turnTime;
-    this.physics = createPhysics(room.RAPIER);
+    this.physics = createPhysics(room.RAPIER, { variant });
     settle(this.physics);
     this.rng = mulberry32((Math.random() * 2 ** 32) >>> 0);
     this.game = {
@@ -43,6 +46,7 @@ export class Match {
       log: [], // every throw so far, for the worm: [player index, their score after it, 1 if a miss]
     };
     if (variant === 'battle') newBattle(this.game, first);
+    if (variant === 'milkshake') newShake(this.game, first, { decisive });
     this.spectators = new Set();
     this.over = false; this.busyUntil = 0; this.timer = null; this.turnInfo = null;
     this.autopilot = false; // bots finish the game (the league round's deadline passed)
@@ -63,6 +67,7 @@ export class Match {
     return {
       cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1, log: [...g.log],
       battle: g.battle ? JSON.parse(JSON.stringify(g.battle)) : null,
+      shake: g.shake ? JSON.parse(JSON.stringify(g.shake)) : null, draw: !!g.draw,
       players: g.players.map((p, i) => {
         const s = this.seats[i];
         return { name: p.name, cpu: p.cpu, color: p.color, score: p.score, misses: p.misses, out: p.out,
@@ -183,7 +188,8 @@ export class Match {
     const i = this.game.cur, p = this.game.players[i];
     const spots = computeInfo(liveSpots(this.game, this.physics.bottleSpots()));
     const plan = this.game.battle ? planBattleThrow({ ...p, ai }, spots, roleOf(this.game, i), this.rng)
-      : planCpuThrow({ ...p, ai }, spots, this.game.target, this.rng);
+      : this.game.shake ? planShakeThrow({ ...p, ai }, spots, flavourOfPlayer(i), this.rng)
+        : planCpuThrow({ ...p, ai }, spots, this.game.target, this.rng);
     this.deadline = null;
     this.turnInfo = { cur: i, cpu: { aim: plan.aim, target: plan.target }, ...(standIn ? { standIn: true } : {}) };
     this.send({ t: 'turn', ...this.turnInfo });
@@ -241,25 +247,26 @@ export class Match {
   serialize(seatRef) {
     const g = this.game;
     return {
-      id: this.id, fixture: this.fixture || null, over: this.over, pace: this.pace, turnTime: this.turnTime,
+      id: this.id, fixture: this.fixture || null, over: this.over, pace: this.pace, turnTime: this.turnTime, variant: this.variant,
       autopilot: this.autopilot, deadline: this.turnInfo && !this.turnInfo.cpu ? this.deadline : null,
       seats: this.seats.map(seatRef),
       game: {
         cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
-        players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })), log: g.log, battle: g.battle || null,
+        players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })), log: g.log, battle: g.battle || null, shake: g.shake || null, draw: !!g.draw,
       },
       poses: snapshot(this.physics),
       seq: this.seq, history: this.history, base: this.base, seen: this.seen, tally: this.tally || null,
     };
   }
   static restore(room, d, seats, onOver) {
-    const m = new Match(room, d.id, seats, { target: d.game.target, first: d.game.cur, onOver, pace: d.pace || 'live', turnTime: d.turnTime === undefined ? TURN_TIME : d.turnTime });
+    const m = new Match(room, d.id, seats, { target: d.game.target, first: d.game.cur, onOver, pace: d.pace || 'live', turnTime: d.turnTime === undefined ? TURN_TIME : d.turnTime, variant: d.variant || 'classic' });
     Object.assign(m, { fixture: d.fixture, over: d.over, autopilot: !!d.autopilot, savedDeadline: d.deadline || null, tally: d.tally || null });
     if (d.seq) Object.assign(m, { seq: d.seq, history: d.history || [], base: d.base || null, seen: d.seen || m.seen });
     d.game.players.forEach((p, i) => Object.assign(m.game.players[i], p));
     m.game.winner = d.game.winner >= 0 ? m.game.players[d.game.winner] : null;
     m.game.log = d.game.log || [];
     m.game.battle = d.game.battle || null;
+    m.game.shake = d.game.shake || null; m.game.draw = !!d.game.draw;
     m.physics.bottles.forEach((b, i) => {
       const [x, y, z, qx, qy, qz, qw] = d.poses[i];
       b.body.setTranslation({ x, y, z }, true); b.body.setRotation({ x: qx, y: qy, z: qz, w: qw }, true);
