@@ -1,7 +1,9 @@
 // Game rules: players, scoring, turn order and re-standing fallen bottles.
-// A game is a plain object: { players, cur, target, winner }.
+// A game is a plain object: { players, cur, target, winner }, plus `battle` for a battle (battle.js), whose own
+// rules take over scoring, turns and re-standing.
 import { BOTTLE_R, BOTTLE_HALF, COLORS, upY, upVector } from './constants.js';
 import { LEVELS } from './ai.js';
+import { battleThrow, battleRestand } from './battle.js';
 
 export const MAX_MISSES = 3;
 export const half = target => target / 2;
@@ -27,6 +29,7 @@ export function createPlayers(types) {
 // Apply a throw by the current player that knocked down the bottles numbered `fallenNums`.
 // Updates scores, misses and the winner; returns the message to show.
 export function scoreThrow(game, fallenNums) {
+  if (game.battle) return battleThrow(game, fallenNums); // (which also moves the turn on)
   const p = game.players[game.cur], target = game.target;
   let msg;
   if (fallenNums.length === 0) {
@@ -48,12 +51,14 @@ export function scoreThrow(game, fallenNums) {
 export const isGameOver = game => !!game.winner || game.players.every(q => q.out);
 
 export function advanceTurn(game) {
+  if (game.battle) return; // a battle's turns move on as each throw is scored
   do { game.cur = (game.cur + 1) % game.players.length; } while (game.players[game.cur].out);
 }
 
 // Where each bottle stands after a throw. poses: [{ t: {x,y,z}, q: {x,y,z,w} }] in bottle order.
 // Returns [{ needs, x, z }]: `needs` is true for bottles that must be stood up at (x, z).
-export function planRestand(poses, rng = Math.random) {
+// In a battle (game given, poses with bottle numbers), bottles taken out are parked and stray ones put back.
+export function planRestand(poses, rng = Math.random, game = null) {
   const items = poses.map(({ t, q }) => {
     const needs = upY(q) < 0.97 || t.y < BOTTLE_HALF - 0.006;
     if (!needs) return { needs, x: t.x, z: t.z };
@@ -76,5 +81,5 @@ export function planRestand(poses, rng = Math.random) {
       else { B.x += nx * push; B.z += nz * push; }
     }
   }
-  return items;
+  return game?.battle ? battleRestand(poses, items, game) : items;
 }

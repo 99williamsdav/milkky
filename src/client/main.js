@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { BOTTLE_HALF, STICK_HALF, FRONT_Z, ROW, RELEASE, COLORS, AIM_LIMIT, MIN_DIST, MAX_DIST } from '../shared/constants.js';
 import { createPhysics, launchSpeedFor } from '../shared/physics.js';
 import { createPlayers, newPlayer, scoreThrow, isGameOver, advanceTurn, planRestand, verb } from '../shared/rules.js';
-import { computeInfo, planCpuThrow } from '../shared/ai.js';
+import { computeInfo, planCpuThrow, planBattleThrow } from '../shared/ai.js';
+import { newBattle, liveSpots, roleOf, chaseText, isParked, AREA, BATTLE_THROWS, BOTTLES } from '../shared/battle.js';
 import { app, renderer, canvas, scene, camera } from './scene.js';
 import { decorateBottles, stickMesh, hand, aimGeo, aimLine, landRing } from './models.js';
 import { clearMilk, updateMilk } from './milk.js';
@@ -47,6 +48,7 @@ const SLOT_LABEL = { human: 'Human', easy: 'Computer · Easy', medium: 'Computer
 let slots = ['human', 'medium'];
 let lastSetup = slots.slice();
 let chosenTarget = 50; // the score to hit exactly; going over drops you to half
+let chosenVariant = 'classic'; // classic, or battle (shared/battle.js: two players, attack and defend)
 let mode = 'quick', leagueMatch = null; // quick | league | online
 
 // Online, whether player i of the game on screen is us
@@ -72,11 +74,16 @@ function resetBottles() {
 function startGame(types) {
   lastSetup = types.slice();
   game.players = createPlayers(types);
-  mode = 'quick'; game.target = chosenTarget;
+  mode = 'quick'; game.target = chosenTarget; game.variant = chosenVariant;
   launch(0);
 }
 // The game's worm: each player's score after each of their throws (game.log: [player, score after, missed])
 function gameWorm(g) {
+  if (g.battle) { // bottles cleared after each attacking throw, for each attack
+    const series = g.players.map((p, i) => ({ name: p.name, color: p.color,
+      points: g.battle.legs.find(l => l.attacker === i).log.map(y => ({ y })) }));
+    return series.some(s => s.points.length) ? wormHTML(series, { max: BOTTLES, target: BOTTLES, xLabel: 'Attacking throws', yLabel: 'Cleared' }) : '';
+  }
   const series = g.players.map((p, i) => ({ name: p.name, color: p.color,
     points: (g.log || []).filter(e => e[0] === i).map(e => ({ y: e[1], miss: !!e[2] })) }));
   return series.some(s => s.points.length) ? wormHTML(series, { max: g.target, target: g.target }) : '';
@@ -84,7 +91,12 @@ function gameWorm(g) {
 function launch(first) {
   game.cur = first; game.winner = null; game.log = []; physics.removeStick(); resetBottles();
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
-  Achv.gameStarted(game.players.map(p => !p.cpu)); // on this device, every person's throws count
+  game.battle = null;
+  if (game.variant === 'battle') {
+    newBattle(game, first);
+    Achv.gameLeft(); // achievements are for the classic game
+    toast(`Battle! ${game.players[first].name} ${verb(game.players[first], 'attacks', 'attack')} first: clear all ${BOTTLES} in ${BATTLE_THROWS} throws`, 2600, true);
+  } else Achv.gameStarted(game.players.map(p => !p.cpu)); // on this device, every person's throws count
   beginTurn();
 }
 function beginTurn() {
@@ -94,10 +106,15 @@ function beginTurn() {
   state = p.cpu ? 'cpu' : 'aim';
   renderBoard();
   if (p.cpu) return cpuPlan(p);
-  // The scoreboard shows whose turn it is; say it out loud only when people share the device.
-  if (!throwTip() && game.players.filter(q => !q.cpu).length > 1) toast(`${p.name}'s turn`, 1400);
+  // The scoreboard shows whose turn it is; say it out loud only when people share the device (or, in a battle,
+  // which job you have this turn).
+  if (throwTip()) return;
+  const role = game.battle && (roleOf(game, game.cur) === 'attack' ? 'attack' : 'defend: scatter them');
+  if (game.players.filter(q => !q.cpu).length > 1) toast(`${p.name}'s turn${role ? ` to ${role}` : ''}`, 1400);
+  else if (role && game.battle.legs[game.battle.leg].throws < 2) toast(`Your turn to ${role}`, 1400);
 }
 function renderBoard() {
+  if (game.battle) return renderBattleBoard();
   $('#board').innerHTML = game.players.map((p, i) => `
     <div class="chip ${i === game.cur && state !== 'over' ? 'active' : ''} ${p.out ? 'out' : ''}">
       <div class="nm">${p.bot ? faceSVG(p.bot, 18) : `<span class="sw" style="background:${p.color}"></span>`}${esc(p.name)}${isMe(i) ? ' (you)' : ''}${p.left ? '<small>· computer</small>' : p.away ? '<small>· away</small>' : ''}</div>
@@ -106,6 +123,39 @@ function renderBoard() {
       <div class="cd"></div>
     </div>`).join('');
 }
+// A battle: each player's bottles cleared, and what they're doing (attacking: which throw, and in the second leg
+// what they need to win; defending; or how their attack went)
+function renderBattleBoard() {
+  const b = game.battle;
+  $('#board').innerHTML = game.players.map((p, i) => {
+    const leg = b.legs.find(l => l.attacker === i), now = !b.over && i === game.cur;
+    const attacking = !b.over && b.legs[b.leg].attacker === i, played = leg.throws > 0 && !attacking;
+    const sub = attacking ? `Throw ${Math.min(leg.throws + 1, BATTLE_THROWS)} of ${BATTLE_THROWS}${chaseText(game) ? `<br>${chaseText(game)}` : ''}`
+      : played ? `Cleared ${leg.cleared} in ${leg.throws}` : !b.over ? 'Attacks next leg' : '';
+    return `<div class="chip ${now ? 'active' : ''}">
+      <div class="nm">${p.bot ? faceSVG(p.bot, 18) : `<span class="sw" style="background:${p.color}"></span>`}${esc(p.name)}${isMe(i) ? ' (you)' : ''}${p.left ? '<small>· computer</small>' : p.away ? '<small>· away</small>' : ''}</div>
+      <div class="role">${b.over ? '' : attacking ? 'Attacking' : 'Defending'}</div>
+      <div class="sc">${p.score}<small>/${BOTTLES}</small></div>
+      <div class="tsub">${sub}</div>
+      <div class="cd"></div>
+    </div>`;
+  }).join('');
+}
+// Battle: the marked playing area on the lawn, and bottles taken out of the game hidden
+const areaLine = (() => {
+  const pts = [], arc = (r, from, to) => { for (let k = 0; k <= 24; k++) { const a = from + (to - from) * k / 24; pts.push(V(RELEASE.x + Math.sin(a) * r, 0.004, RELEASE.z - Math.cos(a) * r)); } };
+  arc(AREA.near, -AREA.side, AREA.side); arc(AREA.far, AREA.side, -AREA.side);
+  const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.25, gapSize: 0.18, transparent: true, opacity: 0.55 }));
+  line.computeLineDistances(); line.visible = false; scene.add(line);
+  return line;
+})();
+function syncBattleBottles() {
+  if (!game.battle) return;
+  const gone = new Set(game.battle.removed);
+  for (const p of bottles) p.mesh.visible = p.label.visible = !gone.has(p.num);
+}
+
 let toastTimer;
 // small: a longer message in smaller text that can wrap
 function toast(msg, ms = 2000, small = false) {
@@ -189,7 +239,8 @@ canvas.addEventListener('pointercancel', e => release(e, true));
 // ---------- Computer players ----------
 let cpu = null;
 function cpuPlan(pl) {
-  cpu = { t: 0, ...planCpuThrow(pl, computeInfo(physics.bottleSpots()), game.target) };
+  const spots = computeInfo(liveSpots(game, physics.bottleSpots()));
+  cpu = { t: 0, ...(game.battle ? planBattleThrow(pl, spots, roleOf(game, game.cur)) : planCpuThrow(pl, spots, game.target)) };
 }
 function cpuTick(dt) {
   cpu.t += dt;
@@ -211,6 +262,7 @@ function resolveThrow() {
   const thrower = game.cur, before = game.players[thrower], scoreBefore = before.score, missesBefore = before.misses;
   const msg = scoreThrow(game, fallen.map(p => p.num));
   game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]); // for the worm
+  if (game.battle) { toast(msg, 2200); renderBoard(); state = 'scoring'; phaseT = 0; return; } // (no classic stats or achievements)
   if (mode === 'league' && careerTally && thrower === 0) Stats.recordThrow(careerTally, fallen.map(p => p.num), scoreBefore, game.target);
   Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, needle: physics.needle, before: throwFrom || {}, release: RELEASE,
     target: game.target, players: game.players, scoreBefore, missesBefore,
@@ -221,8 +273,14 @@ function resolveThrow() {
 function startRestand() {
   physics.removeStick(); stickMesh.visible = false;
   physicsOn = false;
-  const poses = bottles.map(p => ({ t: p.body.translation(), q: p.body.rotation() }));
-  const plan = mode === 'online' ? onlineRestandPlan() : planRestand(poses);
+  const poses = bottles.map(p => ({ t: p.body.translation(), q: p.body.rotation(), num: p.num }));
+  const plan = mode === 'online' ? onlineRestandPlan() : planRestand(poses, Math.random, game);
+  // Battle: bottles taken out of the game go straight to their parking spot, out of sight
+  plan.forEach((pl, i) => {
+    if (!pl.needs || !(pl.gone || isParked(pl.x, pl.z))) return;
+    physics.placeUpright(bottles[i].body, pl.x, pl.z); bottles[i].mesh.visible = bottles[i].label.visible = false;
+    pl.needs = false;
+  });
   const items = bottles.map((p, i) => {
     const { t, q } = poses[i];
     return { p, needs: plan[i].needs, from: V(t.x, t.y, t.z), fromQ: new THREE.Quaternion(q.x, q.y, q.z, q.w), x: plan[i].x, z: plan[i].z };
@@ -238,6 +296,12 @@ function finishRestand() {
   bottles.forEach(p => p.label.material.color.set(0xffffff));
   tween = null; physicsOn = true;
   if (mode === 'online') return finishOnlineThrow();
+  // Battle: the first leg is over, so a fresh rack for the second
+  if (game.battle?.resetRack) {
+    game.battle.removed = []; game.battle.resetRack = false; resetBottles();
+    const p = game.players[game.cur];
+    toast(`Leg 2: ${p.name} ${verb(p, 'attacks', 'attack')}. ${chaseText(game)}`, 3000, true);
+  }
   if (isGameOver(game)) return showOver();
   advanceTurn(game);
   beginTurn();
@@ -246,8 +310,13 @@ function showOver() {
   const { winner } = game;
   state = 'over'; renderBoard();
   $('#overTitle').textContent = !winner ? 'Out after three misses' : isMe(game.players.indexOf(winner)) ? 'You win!' : `${winner.name} ${verb(winner, 'wins', 'win')}!`;
-  const sorted = [...game.players].sort((a, b) => b.score - a.score);
-  $('#standings').innerHTML = sorted.map(p => `<li><span style="color:${p.color};font-weight:600">${esc(p.name)}${p.out ? ' (out)' : ''}</span><b>${p.score}</b></li>`).join('');
+  if (game.battle) { // each attack: all cleared, and in how many throws, or how many
+    const line = i => { const l = game.battle.legs.find(l => l.attacker === i); return l.cleared === BOTTLES ? `all ${BOTTLES} in ${l.throws}` : `${l.cleared} of ${BOTTLES}`; };
+    $('#standings').innerHTML = game.players.map((p, i) => `<li><span style="color:${p.color};font-weight:600">${esc(p.name)}${p === winner ? ' 🏆' : ''}</span><b>${line(i)}</b></li>`).join('');
+  } else {
+    const sorted = [...game.players].sort((a, b) => b.score - a.score);
+    $('#standings').innerHTML = sorted.map(p => `<li><span style="color:${p.color};font-weight:600">${esc(p.name)}${p.out ? ' (out)' : ''}</span><b>${p.score}</b></li>`).join('');
+  }
   $('#overWorm').innerHTML = gameWorm(game);
   $('#againBtn').textContent = mode === 'league' ? 'Continue' : mode === 'online' ? 'Back to room' : 'Play again';
   $('#overNew').textContent = mode === 'online' ? 'Leave room' : 'Change players';
@@ -269,8 +338,9 @@ function renderLeague() {
   const leagueOver = Career.leagueDone(c), done = Career.seasonOver(c), next = League.nextEvent();
   const above = tier > 0 ? Career.tierName(tier - 1) : null, below = tier < Career.BOTTOM ? Career.tierName(tier + 1) : null;
   $('#lgTitle').textContent = `${Career.tierName(tier)} · season ${c.season}`;
-  $('#lgSub').textContent = leagueOver ? `${done ? 'Season complete' : 'League games complete; the cup final is still to come'}. First to ${c.target}.`
-    : `Round ${c.round + 1} of ${Career.leagueRounds()} · first to ${c.target}. `
+  const length = c.variant === 'battle' ? 'battles' : `first to ${c.target}`;
+  $('#lgSub').textContent = leagueOver ? `${done ? 'Season complete' : 'League games complete; the cup final is still to come'}. ${length[0].toUpperCase() + length.slice(1)}.`
+    : `Round ${c.round + 1} of ${Career.leagueRounds()} · ${length}. `
       + [above && `Top ${Career.UP} go up to the ${above}`, below && `bottom ${Career.DOWN} go down to the ${below}`].filter(Boolean).join(', ') + '.';
   // Start of a season: what happened at the end of the last one
   const sm = c.summary, moves = sm && c.round === 0 && !c.lastLeague;
@@ -344,9 +414,17 @@ function setLength(t) {
   $('#lgLength').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.t === t));
   $('#lgLengthNote').textContent = LENGTH_NOTE[t];
 }
+let newVariant = 'classic';
+function setNewVariant(v) {
+  newVariant = v;
+  $('#lgVariant').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v));
+  $('#lgLengthRow').hidden = v === 'battle';
+  $('#lgLengthNote').textContent = v === 'battle' ? 'Every game is a battle: attack, defend, then swap. Clear all 12 in fewer throws than your opponent.' : LENGTH_NOTE[newLength];
+}
 function openNewLeague() {
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
   setLength(chosenTarget in LENGTH_NOTE ? chosenTarget : 30);
+  setNewVariant(chosenVariant);
   state = 'menu'; $('#lgNew').hidden = false;
 }
 // Career stats: kept in the career's save (started now for a career from before they existed), and this game's
@@ -364,7 +442,7 @@ function playLeagueMatch() {
     renderLeague(); return;
   }
   const f = League.myFixture(), opp = Career.entryFor(League.opponentOf(f));
-  mode = 'league'; leagueMatch = { cup: f.kind === 'cup' }; game.target = c.target; careerTally = Stats.newTally();
+  mode = 'league'; leagueMatch = { cup: f.kind === 'cup' }; game.target = c.target; game.variant = c.variant || 'classic'; careerTally = Stats.newTally();
   game.players = [newPlayer('You', null, COLORS[0]), { ...newPlayer(opp.name, opp.ai, COLORS[1]), bot: opp.bot }];
   // League games alternate who throws first; cup ties are a coin toss
   launch(f.kind === 'cup' ? (Math.random() < 0.5 ? 0 : 1) : c.round % 2);
@@ -377,7 +455,7 @@ function finishLeagueMatch() {
     // Underdogs: beating anyone from a league above yours
     if (won && Career.tierOf(c, bot.bot) < tier) Achv.unlock('underdogs');
   }
-  if (careerTally) Stats.recordGame(careerStats(), careerTally, { won, cup: leagueMatch.cup, opp: bot.bot, youOut: me.out, theyOut: bot.out });
+  if (careerTally) Stats.recordGame(careerStats(), careerTally, { won, cup: leagueMatch.cup, opp: bot.bot, youOut: me.out, theyOut: bot.out, battle: !!game.battle });
   League.record(me.score, bot.score, won); // (saves the career, stats included)
   leagueMatch = null; mode = 'quick'; careerTally = null;
   careerAchievements();
@@ -683,6 +761,9 @@ function renderLobby() {
   const r = online.room;
   if (!r) return;
   const host = r.you === r.host, league = r.mode === 'league', career = r.mode === 'career', n = r.seats.length;
+  const battle = r.variant === 'battle';
+  $('#lbVariant').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.v === (r.variant || 'classic')); b.disabled = !host; });
+  ['#lbTargetLabel', '#lbTarget'].forEach(sel => $(sel).hidden = battle);
   $('#lbTitle').textContent = `Room ${r.code}`;
   $('#lbLink').textContent = shareLink(r.code);
   $('#lbMode').querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.mode === r.mode); b.disabled = !host; });
@@ -709,7 +790,7 @@ function renderLobby() {
   $('#lbAdd').hidden = !host || n >= r.maxSeats || career;
   $('#lbStart').hidden = !host;
   $('#lbStart').textContent = league ? 'Start league' : career ? 'Start career' : 'Start game';
-  $('#lbStart').disabled = n < (career ? 1 : 2);
+  $('#lbStart').disabled = n < (career ? 1 : 2) || (battle && r.mode === 'game' && n !== 2);
   renderPush(); // (the pace may have changed)
   $('#lbWait').textContent = !host ? `Waiting for the host to start the ${league ? 'league' : career ? 'career' : 'game'}.`
     : career ? 'Start when you like. Anyone who joins later starts at the beginning of the next season.'
@@ -815,6 +896,7 @@ document.addEventListener('visibilitychange', () => {
 function applyGame(g) {
   game.players = g.players.map(p => ({ ...p }));
   game.log = g.log || [];
+  game.battle = g.battle || null;
   game.cur = g.cur; game.target = g.target;
   game.winner = g.winner >= 0 ? game.players[g.winner] : null;
 }
@@ -835,6 +917,7 @@ function onlineSync(m) {
   physics.removeStick();
   clearMilk(bottles); bottles.forEach(p => p.label.material.color.set(0xffffff));
   applyGame(m.game); snapPoses(m.poses); setStickHeld();
+  if (game.battle) syncBattleBottles(); else bottles.forEach(p => { p.mesh.visible = p.label.visible = true; });
   if (m.over) noteWorm(m.match);
   // Achievements count in our own game; joining partway (a rejoin) doesn't count as the opening throw
   if (online.view === 'game') Achv.gameStarted(game.players.map((p, i) => isMe(i)), { midway: m.t === 'sync' }); else Achv.gameLeft();
@@ -916,9 +999,11 @@ function resolveOnlineThrow() {
   online.play = null; online.pending = m;
   const fallen = new Set(m.fallen);
   bottles.forEach(p => { if (fallen.has(p.num)) p.label.material.color.set(0xff6b5b); });
+  const legBefore = game.battle?.leg;
   applyGame(m.game); game.cur = m.seat; // keep the thrower highlighted until the next turn
   if (m.over) noteWorm(m.match);
-  if (online.view === 'game') { // our own game (not one we're watching)
+  if (game.battle && legBefore === 0 && game.battle.leg === 1) online.newLeg = true; // announced once the rack is reset
+  if (online.view === 'game' && !game.battle) { // our own game (not one we're watching); achievements are for the classic game
     const f = online.throwFrom;
     Achv.thrown({ who: m.seat, fallen: m.fallen, hit: m.hit, needle: m.needle, before: f.before, release: RELEASE, target: game.target,
       players: game.players, scoreBefore: f.scoreBefore, missesBefore: f.missesBefore, winner: m.game.winner, over: m.over });
@@ -936,6 +1021,10 @@ function finishOnlineThrow() {
   const m = online.pending;
   online.pending = null;
   snapPoses(m.poses);
+  if (game.battle) {
+    syncBattleBottles();
+    if (online.newLeg) { online.newLeg = false; const p = game.players[m.game.cur]; toast(`Leg 2: ${p.name} ${verb(p, 'attacks', 'attack')}. ${chaseText(game)}`, 3000, true); }
+  }
   if (m.over) return isMulti(online.room) ? showHub() : showOver();
   game.cur = m.game.cur;
   state = 'remote'; // the next turn message is already queued
@@ -955,6 +1044,7 @@ $('#onBack').onclick = () => {
   if (mode === 'online') leaveOnline(); else { $('#online').hidden = true; $('#setup').hidden = false; }
 };
 $('#lbMode').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'mode', mode: b.dataset.mode }); });
+$('#lbVariant').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'variant', variant: b.dataset.v }); });
 $('#lbTarget').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.disabled) net.send({ t: 'target', target: +b.dataset.t }); });
 $('#lbAdd').addEventListener('click', e => { const b = e.target.closest('button'); if (b) net.send({ t: 'addCpu', level: b.dataset.level }); });
 $('#lbSeats').addEventListener('click', e => { const b = e.target.closest('button[data-rm]'); if (b) net.send({ t: 'removeCpu', seat: +b.dataset.rm }); });
@@ -1312,7 +1402,7 @@ function bottleCentre() {
   const c = V(0, 0, 0); let n = 0;
   for (const p of bottles) {
     const t = p.body.translation();
-    if (Math.hypot(t.x - HOME_C.x, t.z - HOME_C.z) < 4) { c.x += t.x; c.z += t.z; n++; }
+    if (Math.hypot(t.x - HOME_C.x, t.z - HOME_C.z) < (game.battle ? 9 : 4)) { c.x += t.x; c.z += t.z; n++; } // (battle bottles spread wider)
   }
   return n ? c.multiplyScalar(1 / n) : HOME_C.clone();
 }
@@ -1379,6 +1469,7 @@ function frame(now) {
     }
     stickMesh.position.set(t.x, t.y, t.z); stickMesh.quaternion.set(r.x, r.y, r.z, r.w);
   }
+  areaLine.visible = !!game.battle && mode !== 'training' && state !== 'menu'; // a battle's playing area
   updateCamera(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -1406,6 +1497,15 @@ $('#slots').addEventListener('click', e => {
   renderSlots();
 });
 renderSlots();
+// Classic or Battle (two players, no target)
+function setVariant(v) {
+  chosenVariant = v;
+  $('#variantPick').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v));
+  $('#targetRow').hidden = v === 'battle'; $('#variantNote').hidden = v !== 'battle';
+  $('#count').querySelectorAll('button').forEach(b => { b.disabled = v === 'battle' && +b.dataset.n !== 2; });
+  if (v === 'battle' && slots.length !== 2) { slots.length = Math.min(slots.length, 2); while (slots.length < 2) slots.push('medium'); renderSlots(); }
+}
+$('#variantPick').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (b) setVariant(b.dataset.v); });
 $('#targetPick').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   chosenTarget = +b.dataset.t;
@@ -1433,7 +1533,8 @@ $('#lgStats').onclick = () => showCareerStats(solo().stats, solo().season, '#lea
 $('#csBack').onclick = () => { $('#careerStats').hidden = true; $(statsFrom).hidden = false; };
 $('#lgReset').onclick = () => { if (confirm('Start a new career from the Sunday League? Your career so far will be lost.')) openNewLeague(); };
 $('#lgLength').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setLength(+b.dataset.t); });
-$('#lgCreate').onclick = () => { League.newCareer(newLength); openLeague(); };
+$('#lgCreate').onclick = () => { League.newCareer(newLength, newVariant); openLeague(); };
+$('#lgVariant').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (b) setNewVariant(b.dataset.v); });
 // Back: to the league you have (choosing Start over doesn't lose it until you start the new one), or the menu
 $('#lgNewBack').onclick = () => { if (solo()) openLeague(); else { $('#lgNew').hidden = true; $('#setup').hidden = false; } };
 $('#onlineBtn').onclick = () => openOnline();

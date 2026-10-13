@@ -22,6 +22,7 @@ import * as push from './push.js';
 const env = (name, fallback) => (process.env[name] !== undefined ? +process.env[name] : fallback);
 export const MAX_SEATS = { game: 4, league: 8, career: 16 };
 const TARGETS = [20, 30, 50];
+const VARIANTS = ['classic', 'battle']; // the rules: the classic game, or a battle (shared/battle.js: two players)
 const PACES = ['live', 'async'];
 const CPU_LEVELS = Object.keys(LEVELS);
 const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
@@ -54,6 +55,7 @@ export class Room {
     // career: lobby → playing ⇄ between, for good.
     this.phase = 'lobby';
     this.target = 50;
+    this.variant = 'classic';
     this.matches = [];      // the game, this league round's fixtures, or this career step's games with people in
     this.league = null;
     this.career = null;     // the career's state (shared/career.js), and the results of this step's played games
@@ -76,7 +78,9 @@ export class Room {
   // Anyone (not a computer player) still has a seat, here or not
   get hasPeople() { return this.seats.some(s => !s.cpu); }
   // A career takes people at any time (they wait for the next season)
-  canJoin() { return (!this.inProgress || this.mode === 'career') && this.seats.length < MAX_SEATS[this.mode]; }
+  canJoin() { return (!this.inProgress || this.mode === 'career') && this.seats.length < this.maxSeats(); }
+  // A single battle is for two; otherwise as many as the game type allows
+  maxSeats(mode = this.mode) { return mode === 'game' && this.variant === 'battle' ? 2 : MAX_SEATS[mode]; }
   uniqueName(name) {
     let n = name, k = 2;
     while (this.seats.some(s => s.name === n)) n = `${name} ${k++}`;
@@ -200,7 +204,7 @@ export class Room {
   roomState(forSeat) {
     return {
       t: 'room', code: this.code, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target, host: this.host,
-      you: this.seatIndex(forSeat), maxSeats: MAX_SEATS[this.mode],
+      you: this.seatIndex(forSeat), maxSeats: this.maxSeats(), variant: this.variant,
       seats: this.seats.map((s, i) => ({ name: s.name, cpu: s.cpu, bot: s.bot || null, color: SEAT_COLORS[i % SEAT_COLORS.length], connected: s.connected, left: !!s.left })),
       league: this.leagueState(),
       career: this.careerState(forSeat),
@@ -232,7 +236,7 @@ export class Room {
     const m = this.matchOf(seat), lg = this.league, c = this.career;
     const tier = c ? Career.tierOf(c, seat.pid) : -1;
     return {
-      code: this.code, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target, updatedAt: this.updatedAt,
+      code: this.code, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target, variant: this.variant, updatedAt: this.updatedAt,
       you: seat.name, host: this.seatIndex(seat) === this.host, players: this.seats.map(s => s.name),
       league: lg && { round: lg.round + 1, rounds: lg.schedule.length, roundEndsIn: this.leagueState().roundEndsIn,
         place: this.leagueState().table.findIndex(e => e.seat === this.seatIndex(seat)) + 1 },
@@ -263,7 +267,7 @@ export class Room {
       case 'mode':
         if (lobbyOnly('change the game type')) return;
         if (!(m.mode in MAX_SEATS)) return this.error(seat, 'Unknown game type');
-        if (this.seats.length > MAX_SEATS[m.mode]) return this.error(seat, `A single game is for up to ${MAX_SEATS[m.mode]} players`);
+        if (this.seats.length > this.maxSeats(m.mode)) return this.error(seat, `A single ${this.variant === 'battle' ? 'battle' : 'game'} is for up to ${this.maxSeats(m.mode)} players`);
         this.mode = m.mode;
         // A career is played at leisure, against its own bots
         if (m.mode === 'career') { this.pace = 'async'; this.seats.filter(s => s.cpu).forEach(s => this.removeSeat(s)); }
@@ -273,6 +277,11 @@ export class Room {
         if (!PACES.includes(m.pace)) return this.error(seat, 'Unknown pace');
         if (this.mode === 'career' && m.pace !== 'async') return this.error(seat, 'A career is always played at your own pace');
         this.pace = m.pace; return this.broadcastRoom();
+      case 'variant':
+        if (lobbyOnly('change the rules')) return;
+        if (!VARIANTS.includes(m.variant)) return this.error(seat, 'Unknown rules');
+        if (m.variant === 'battle' && this.mode === 'game' && this.seats.length > 2) return this.error(seat, 'A battle is for 2 players: remove some first');
+        this.variant = m.variant; return this.broadcastRoom();
       case 'target':
         if (lobbyOnly('change the target')) return;
         if (!TARGETS.includes(m.target)) return this.error(seat, 'Target must be 20, 30 or 50');
@@ -281,7 +290,7 @@ export class Room {
         if (lobbyOnly('add players')) return;
         if (!CPU_LEVELS.includes(m.level)) return this.error(seat, 'Unknown level');
         if (this.mode === 'career') return this.error(seat, 'A career brings its own computer players');
-        if (this.seats.length >= MAX_SEATS[this.mode]) return this.error(seat, 'The room is full');
+        if (this.seats.length >= this.maxSeats()) return this.error(seat, this.variant === 'battle' && this.mode === 'game' ? 'A battle is for 2 players' : 'The room is full');
         this.seats.push(this.newBot(m.level));
         return this.broadcastRoom();
       case 'removeCpu': {
@@ -333,11 +342,12 @@ export class Room {
   // ---------- Game flow ----------
   matchOptions() {
     // Live: a short turn timer. Async single game: a long one. Async league or career: none, the round deadline covers it.
-    return { target: this.target, pace: this.pace, turnTime: !this.async ? TURN_TIME : this.mode === 'game' ? ASYNC_TURN_TIME : null };
+    return { target: this.target, pace: this.pace, turnTime: !this.async ? TURN_TIME : this.mode === 'game' ? ASYNC_TURN_TIME : null, variant: this.variant };
   }
   start(seat) {
     this.dropAbsentSeats(); // anyone who left (or, live, isn't here) doesn't play
     if (this.mode === 'league' && this.seats.length < 2) return this.error(seat, 'A league needs at least 2 players');
+    if (this.mode === 'game' && this.variant === 'battle' && this.seats.length !== 2) return this.error(seat, 'A battle is for exactly 2 players');
     this.seats.forEach(s => { s.left = false; });
     this.disposeMatches(); clearTimeout(this.timer);
     if (this.mode === 'league') return this.startLeague();
@@ -444,7 +454,7 @@ export class Room {
   // ---------- Career ----------
   startCareer() {
     this.league = null;
-    this.career = Career.newCareer({ people: this.seats.filter(s => !s.cpu).map(s => s.pid), target: this.target });
+    this.career = Career.newCareer({ people: this.seats.filter(s => !s.cpu).map(s => s.pid), target: this.target, variant: this.variant });
     this.careerStats = {};
     this.startStep();
   }
@@ -481,7 +491,7 @@ export class Room {
       if (!seat.pid) return;
       const other = m.seats[1 - i], me = m.game.players[i], them = m.game.players[1 - i];
       Stats.recordGame(this.statsFor(seat.pid), m.tally?.[i] || Stats.newTally(),
-        { won: i === 0 ? aWon : !aWon, cup, opp: other.pid || other.bot, youOut: me.out, theyOut: them.out });
+        { won: i === 0 ? aWon : !aWon, cup, opp: other.pid || other.bot, youOut: me.out, theyOut: them.out, battle: !!m.game.battle });
     });
     if (this.matches.every(x => x.over)) return this.endStep();
     this.broadcastRoom();
@@ -492,7 +502,7 @@ export class Room {
   }
   // A throw in a career game (called by the match): it counts for a person's stats if they threw it themselves
   thrown(m, i, fallen, scoreBefore, own) {
-    if (this.mode !== 'career' || !own || !m.seats[i].pid) return;
+    if (this.mode !== 'career' || !own || !m.seats[i].pid || m.game.battle) return;
     m.tally ||= {};
     Stats.recordThrow(m.tally[i] ||= Stats.newTally(), fallen, scoreBefore, m.game.target);
   }
@@ -535,7 +545,7 @@ export class Room {
     const entryOf = seat => lg ? lg.entries.findIndex(e => e.seat === seat) : -1;
     const seatRef = seat => this.seats.includes(seat) ? { s: this.seatIndex(seat) } : seat.cpu === 'career' ? { bot: seat.bot } : { e: entryOf(seat) };
     return {
-      v: 1, code: this.code, origin: this.origin, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target,
+      v: 1, code: this.code, origin: this.origin, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target, variant: this.variant,
       nextRoundAt: this.nextRoundAt || null, roundEndsAt: this.roundEndsAt || null, updatedAt: this.updatedAt, lastVisit: this.lastVisit,
       seats: this.seats.map(s => ({ name: s.name, cpu: s.cpu, bot: s.bot || null, token: s.token, me: s.me || null, left: !!s.left, pid: s.pid || null })),
       career: this.career, stepResults: this.stepResults, careerStats: this.careerStats,
@@ -554,7 +564,7 @@ export class Room {
   static restore(d, RAPIER) {
     const room = new Room(d.code, RAPIER);
     const back = Date.now() + RESTART_GRACE;
-    Object.assign(room, { origin: d.origin || null, mode: d.mode, pace: d.pace || 'live', phase: d.phase, target: d.target, nextRoundAt: d.nextRoundAt,
+    Object.assign(room, { origin: d.origin || null, mode: d.mode, pace: d.pace || 'live', phase: d.phase, target: d.target, variant: d.variant || 'classic', nextRoundAt: d.nextRoundAt,
       emptySince: Date.now(), updatedAt: d.updatedAt || Date.now(), lastVisit: d.lastVisit || Date.now(),
       career: d.career || null, stepResults: d.stepResults || {}, careerStats: d.careerStats || {} });
     room.seats = d.seats.map(s => ({ ...s, ws: null, connected: !!s.cpu, awaySince: back }));

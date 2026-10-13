@@ -8,8 +8,9 @@ const OLD_KEYS = ['milkky-career-v1', 'milkky-league-v1']; // earlier versions: 
 export const ME = '@you';
 export const solo = { career: null };
 
-export function newCareer(target) {
-  solo.career = C.newCareer({ people: [ME], target });
+// variant: classic, or battle (every game a battle)
+export function newCareer(target, variant = 'classic') {
+  solo.career = C.newCareer({ people: [ME], target, variant });
   advance();
 }
 export function save() { try { localStorage.setItem(KEY, JSON.stringify(solo.career)); } catch (e) {} }

@@ -59,6 +59,8 @@ body{height:100%;background:var(--sky);color:var(--ink);
 .chip.out{opacity:.45;text-decoration:line-through}
 .chip .nm{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:5px;justify-content:center}
 .chip .sw{width:9px;height:9px;border-radius:50%}
+.chip .role{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--blue)}
+.chip .role:empty{display:none}
 .chip .sc{font-size:28px;font-weight:800;line-height:1.05;font-variant-numeric:tabular-nums}
 .chip .sc small{font-size:13px;font-weight:400;color:var(--muted)}
 .chip .sc.over{color:var(--bad)} /* training: the average needed is more than a throw can score */
@@ -191,6 +193,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 .pushrow button{font-size:13px;padding:6px 12px;flex:none}
 .count.tiers{margin:4px 0 0}
 .count.tiers button{font-size:13px;padding:7px 4px}
+#targetRow[hidden],#lgLengthRow[hidden],#variantNote[hidden]{display:none}
 .count[hidden],#hcMovesWrap[hidden],#hcResultsWrap[hidden],#hcCupWrap[hidden],#hcWaitWrap[hidden]{display:none}
 #lgMovesWrap[hidden]{display:none}
 #lgMoves{font-size:14px;margin:0 0 6px;display:flex;flex-direction:column;gap:4px}
@@ -345,8 +348,11 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
     <div class="card">
       <h1>Milkky</h1>
       <p class="sub">Knock the numbered bottles. First to hit the target score exactly wins.</p>
-      <div style="font-weight:600">Play to</div>
-      <div class="count" id="targetPick"><button data-t="20">20</button><button data-t="30">30</button><button data-t="50" aria-pressed="true">50</button></div>
+      <div style="font-weight:600">Game</div>
+      <div class="count" id="variantPick"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Battle</button></div>
+      <p class="note" id="variantNote" hidden>One of you attacks, the other defends, then you swap. Clear all 12 bottles in fewer throws to win.</p>
+      <div id="targetRow"><div style="font-weight:600">Play to</div>
+      <div class="count" id="targetPick"><button data-t="20">20</button><button data-t="30">30</button><button data-t="50" aria-pressed="true">50</button></div></div>
       <div style="font-weight:600">Players</div>
       <div class="count" id="count">
         <button data-n="1">1</button><button data-n="2" aria-pressed="true">2</button><button data-n="3">3</button><button data-n="4">4</button>
@@ -368,6 +374,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <li>Reach the target <b>exactly</b> to win (50 in the official game, or 30 or 20 for a shorter one). Go over and you drop to half the target: 25, 15 or 10.</li>
         <li>Three misses in a row and you're out.</li>
       </ul>
+      <p><b>Battle:</b> a game for two, in two legs. One of you attacks and the other defends, taking turns (attacker first) at the same bottles. Bottles the attacker knocks down are out of the game; bottles the defender knocks down are stood up where they land, so the defender's job is to scatter them. The attacker has 20 throws to clear all 12, then you swap. Whoever clears them in fewer throws wins (or, if neither does, whoever cleared more). Bottles knocked outside the marked area are put back on its edge.</p>
       <p><b>Throwing:</b> the stick is thrown underhand and upright. Press and drag down to swing back, then flick up and let go. A faster flick throws further. Where you press left or right of centre sets your aim.</p>
       <button class="primary" id="rulesClose">Got it</button>
     </div>
@@ -414,8 +421,10 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
     <div class="card">
       <h2>New career</h2>
       <p class="sub">Start in the Sunday League and work your way up to the Premier League. Each season the top 2 go up and the bottom 2 go down.</p>
-      <div style="font-weight:600">Game length</div>
-      <div class="count" id="lgLength"><button data-t="20">20<small>Quick</small></button><button data-t="30">30<small>Standard</small></button><button data-t="50">50<small>Full</small></button></div>
+      <div style="font-weight:600">Game</div>
+      <div class="count" id="lgVariant"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Battle</button></div>
+      <div id="lgLengthRow"><div style="font-weight:600">Game length</div>
+      <div class="count" id="lgLength"><button data-t="20">20<small>Quick</small></button><button data-t="30">30<small>Standard</small></button><button data-t="50">50<small>Full</small></button></div></div>
       <p class="note" id="lgLengthNote"></p>
       <div class="row"><button class="primary" id="lgCreate">Start career</button><button id="lgNewBack">Back</button></div>
     </div>
@@ -473,10 +482,12 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div style="font-weight:600">Game</div>
       <div class="count" id="lbMode"><button data-mode="game">Single game</button><button data-mode="league">League</button><button data-mode="career">Career</button></div>
       <p class="note" id="lbModeNote"></p>
+      <div style="font-weight:600">Rules</div>
+      <div class="count" id="lbVariant"><button data-v="classic" aria-pressed="true">Classic</button><button data-v="battle">Battle</button></div>
       <div style="font-weight:600" id="lbPaceLabel">Pace</div>
       <div class="count" id="lbPace"><button data-pace="live">Live</button><button data-pace="async">Take your time</button></div>
       <p class="note" id="lbPaceNote"></p>
-      <div style="font-weight:600">Play to</div>
+      <div style="font-weight:600" id="lbTargetLabel">Play to</div>
       <div class="count" id="lbTarget"><button data-t="20">20</button><button data-t="30">30</button><button data-t="50">50</button></div>
       <div style="font-weight:600;margin-bottom:6px">Players</div>
       <div id="lbSeats"></div>

@@ -1,6 +1,7 @@
 // Computer players: target choice, throwing error, and the quick bot-vs-bot simulation.
 import { RELEASE, AIM_LIMIT, MIN_DIST, MAX_DIST, clamp, homePositions } from './constants.js';
 import { gauss } from './rng.js';
+import { BATTLE_THROWS, BOTTLES, AREA, battleWinner } from './battle.js';
 
 // Basic target choice plus human-like throwing error. No lookahead, no physics prediction.
 export const LEVELS = {
@@ -130,4 +131,57 @@ export function simulateGame(A, B, first, target, rng = Math.random) {
     t = 1 - t;
   }
   return { winner: ps[0].score >= ps[1].score ? 0 : 1, scores: ps.map(q => q.score) };
+}
+
+// ---------- Battle (battle.js) ----------
+// The attacker aims where it expects to take out the most bottles; the defender aims just past the tightest
+// group, so the stick carries through and scatters it (the better defence in simulations). info: the bottles
+// still in play (computeInfo). Returns the same as planCpuThrow.
+function battleTarget(role, info, ai, rng) {
+  if (role === 'defend') return { tgt: safestSpot(info), extra: 0.4 };
+  const cands = [...info, safestSpot(info)];
+  let tgt = cands[0], best = -1;
+  for (const c of cands) {
+    let u = 0;
+    for (let k = 0; k < 40; k++) u += throwOutcome(c, info, ai, rng).hits.length;
+    if (u > best) { best = u; tgt = c; }
+  }
+  return { tgt, extra: 0 };
+}
+export function planBattleThrow(pl, info, role, rng = Math.random) {
+  const { tgt, extra } = battleTarget(role, info, pl.ai, rng), lvl = pl.ai;
+  const dx = tgt.x - RELEASE.x, dz = tgt.z - RELEASE.z;
+  const aim = clamp(Math.atan2(dx, -dz), -AIM_LIMIT, AIM_LIMIT);
+  const thrownAim = clamp(aim + gauss(rng) * lvl.aimSd, -AIM_LIMIT, AIM_LIMIT);
+  const thrownDist = clamp((Math.hypot(dx, dz) + extra) * (1 + gauss(rng) * lvl.distSd), MIN_DIST, MAX_DIST);
+  return { aim, thrownAim, thrownDist, target: tgt.bottle.num };
+}
+// A whole battle between bots, without the physics (for careers' background games). Same shape as simulateGame:
+// { winner, scores } (bottles cleared by each).
+export function simulateBattle(A, B, first, rng = Math.random) {
+  const ais = [A.ai, B.ai];
+  const legs = [first, 1 - first].map(att => {
+    let field = homePositions().map(({ num, x, z }) => ({ bottle: { num }, x, z }));
+    const leg = { attacker: att, throws: 0, cleared: 0, log: [] };
+    while (field.length && leg.throws < BATTLE_THROWS) {
+      let info = computeInfo(field);
+      const { hits } = throwOutcome(battleTarget('attack', info, ais[att], rng).tgt, info, ais[att], rng);
+      field = field.filter(f => !hits.some(h => h.bottle.num === f.bottle.num));
+      leg.throws++; leg.cleared = BOTTLES - field.length; leg.log.push(leg.cleared);
+      if (!field.length) break;
+      // The defender scatters what it hits, further than an ordinary throw moves them, within the area
+      info = computeInfo(field);
+      const d = throwOutcome(battleTarget('defend', info, ais[1 - att], rng).tgt, info, ais[1 - att], rng);
+      for (const h of d.hits) {
+        const f = field.find(q => q.bottle.num === h.bottle.num), push = 0.2 + rng() * 0.8, side = gauss(rng) * 0.3;
+        f.x += d.ux * push - d.uz * side; f.z += d.uz * push + d.ux * side;
+        const dx = f.x - RELEASE.x, dz = f.z - RELEASE.z;
+        const r = clamp(Math.hypot(dx, dz), AREA.near, AREA.far), a = clamp(Math.atan2(dx, -dz), -AREA.side, AREA.side);
+        f.x = RELEASE.x + Math.sin(a) * r; f.z = RELEASE.z - Math.cos(a) * r;
+      }
+    }
+    return leg;
+  });
+  const w = battleWinner(legs), byPlayer = [0, 1].map(i => legs.find(l => l.attacker === i).cleared);
+  return { winner: w, scores: byPlayer };
 }

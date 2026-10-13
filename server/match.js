@@ -7,7 +7,8 @@
 // can watch what they missed, and turns only run out after a long limit (or the league round's deadline).
 import { createPhysics } from '../src/shared/physics.js';
 import { newPlayer, scoreThrow, isGameOver, advanceTurn, planRestand } from '../src/shared/rules.js';
-import { LEVELS, computeInfo, planCpuThrow } from '../src/shared/ai.js';
+import { LEVELS, computeInfo, planCpuThrow, planBattleThrow } from '../src/shared/ai.js';
+import { newBattle, liveSpots, roleOf } from '../src/shared/battle.js';
 import { COLORS, AIM_LIMIT, MIN_DIST, MAX_DIST, clamp } from '../src/shared/constants.js';
 import { mulberry32 } from '../src/shared/rng.js';
 import { simulateThrow, snapshot, settle } from './sim.js';
@@ -28,7 +29,8 @@ const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 export class Match {
   // seats: the players, in seat order. first: index of who throws first. onOver(match) when it ends.
   // turnTime: ms a person has for a turn before a bot plays it (null: no limit).
-  constructor(room, id, seats, { target, first = 0, onOver = () => {}, pace = 'live', turnTime = TURN_TIME }) {
+  // variant: 'classic', or 'battle' (two players: shared/battle.js)
+  constructor(room, id, seats, { target, first = 0, onOver = () => {}, pace = 'live', turnTime = TURN_TIME, variant = 'classic' }) {
     this.room = room; this.id = id; this.seats = seats; this.onOver = onOver;
     this.pace = pace; this.turnTime = turnTime;
     this.physics = createPhysics(room.RAPIER);
@@ -40,6 +42,7 @@ export class Match {
       cur: first, target, winner: null,
       log: [], // every throw so far, for the worm: [player index, their score after it, 1 if a miss]
     };
+    if (variant === 'battle') newBattle(this.game, first);
     this.spectators = new Set();
     this.over = false; this.busyUntil = 0; this.timer = null; this.turnInfo = null;
     this.autopilot = false; // bots finish the game (the league round's deadline passed)
@@ -59,6 +62,7 @@ export class Match {
     const g = this.game;
     return {
       cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1, log: [...g.log],
+      battle: g.battle ? JSON.parse(JSON.stringify(g.battle)) : null,
       players: g.players.map((p, i) => {
         const s = this.seats[i];
         return { name: p.name, cpu: p.cpu, color: p.color, score: p.score, misses: p.misses, out: p.out,
@@ -177,7 +181,9 @@ export class Match {
   computerTurn(delay, ai, standIn = false) {
     clearTimeout(this.timer);
     const i = this.game.cur, p = this.game.players[i];
-    const plan = planCpuThrow({ ...p, ai }, computeInfo(this.physics.bottleSpots()), this.game.target, this.rng);
+    const spots = computeInfo(liveSpots(this.game, this.physics.bottleSpots()));
+    const plan = this.game.battle ? planBattleThrow({ ...p, ai }, spots, roleOf(this.game, i), this.rng)
+      : planCpuThrow({ ...p, ai }, spots, this.game.target, this.rng);
     this.deadline = null;
     this.turnInfo = { cur: i, cpu: { aim: plan.aim, target: plan.target }, ...(standIn ? { standIn: true } : {}) };
     this.send({ t: 'turn', ...this.turnInfo });
@@ -194,7 +200,7 @@ export class Match {
     this.room.thrown?.(this, thrower, fallen, scoreBefore, own); // career stats
     game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]);
 
-    const plan = planRestand(physics.bottles.map(b => ({ t: b.body.translation(), q: b.body.rotation() })), this.rng);
+    const plan = planRestand(physics.bottles.map(b => ({ t: b.body.translation(), q: b.body.rotation(), num: b.num })), this.rng, game);
     physics.removeStick();
     const restand = [];
     physics.bottles.forEach((b, i) => {
@@ -203,6 +209,8 @@ export class Match {
       restand.push([i, plan[i].x, plan[i].z]);
     });
     settle(physics);
+    // Battle: the first leg is over, so a fresh rack for the second (clients snap to the poses sent)
+    if (game.battle?.resetRack) { physics.resetBottles(); game.battle.removed = []; game.battle.resetRack = false; settle(physics); }
 
     const over = isGameOver(game);
     if (!over) advanceTurn(game);
@@ -238,7 +246,7 @@ export class Match {
       seats: this.seats.map(seatRef),
       game: {
         cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
-        players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })), log: g.log,
+        players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })), log: g.log, battle: g.battle || null,
       },
       poses: snapshot(this.physics),
       seq: this.seq, history: this.history, base: this.base, seen: this.seen, tally: this.tally || null,
@@ -251,6 +259,7 @@ export class Match {
     d.game.players.forEach((p, i) => Object.assign(m.game.players[i], p));
     m.game.winner = d.game.winner >= 0 ? m.game.players[d.game.winner] : null;
     m.game.log = d.game.log || [];
+    m.game.battle = d.game.battle || null;
     m.physics.bottles.forEach((b, i) => {
       const [x, y, z, qx, qy, qz, qw] = d.poses[i];
       b.body.setTranslation({ x, y, z }, true); b.body.setRotation({ x: qx, y: qy, z: qz, w: qw }, true);

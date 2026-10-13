@@ -27,20 +27,24 @@ export function recordThrow(t, fallen, scoreBefore, target) {
 
 // ---------- When it ends ----------
 // won; cup (a cup tie); opp (their career id: a bot id, or a person's); youOut / theyOut (went out on three misses)
-export function recordGame(s, t, { won, cup, opp, youOut, theyOut }) {
+// battle: a battle (shared/battle.js), where only the result counts (its throws aren't the classic game's)
+export function recordGame(s, t, { won, cup, opp, youOut, theyOut, battle = false }) {
   s.games++;
+  if (battle) s.battles = (s.battles || 0) + 1;
+  if (battle) t = { throws: 0, points: 0, bottles: 0, misses: 0, singles: 0, overs: 0, best: 0, last: -1 };
   for (const k of ['throws', 'points', 'bottles', 'misses', 'singles', 'overs']) s[k] += t[k];
   s.bestThrow = Math.max(s.bestThrow, t.best);
   const v = (s.vs[opp] ||= { w: 0, l: 0 });
   if (won) {
     s.won++; v.w++; s.streak++; s.bestStreak = Math.max(s.bestStreak, s.streak);
-    if (theyOut) s.wonByMisses++;
+    if (battle) { /* no classic finish */ }
+    else if (theyOut) s.wonByMisses++;
     else if (t.last === 1) s.winSingle++;
     else s.winMulti++;
-    if (!theyOut) s.fastestWin = s.fastestWin == null ? t.throws : Math.min(s.fastestWin, t.throws);
+    if (!theyOut && !battle) s.fastestWin = s.fastestWin == null ? t.throws : Math.min(s.fastestWin, t.throws);
   } else {
     s.lost++; v.l++; s.streak = 0;
-    if (youOut) s.lostByMisses++;
+    if (youOut && !battle) s.lostByMisses++;
   }
   if (cup) { s.cupPlayed++; if (won) s.cupWon++; }
 }
