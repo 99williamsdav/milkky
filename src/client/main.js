@@ -733,7 +733,7 @@ function renderWatchers() {
 
 // Emotes: quick faces for everyone in the game, when there's another person to see them
 // (a person playing in it, or someone watching)
-const EMOJI = { smile: '😊', laugh: '😂', sad: '😢', angry: '😠' };
+const EMOJI = { smile: '😊', laugh: '😂', sad: '😢', angry: '😠', shock: '😱', facepalm: '🤦', heart: '❤️' };
 function hasCompany() {
   if (!online || !game || !['game', 'watch'].includes(online.view)) return false;
   const people = game.players.filter(p => !p.cpu && !p.left && p.seat !== online.seat).length;

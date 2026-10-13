@@ -29,7 +29,7 @@ const SINGLE_SEATS = { battle: [2, 2], milkshake: [2, 4] }; // a single game's f
 const PACES = ['live', 'async'];
 const CPU_LEVELS = Object.keys(LEVELS);
 const SEAT_COLORS = ['#1f4e8c', '#c0392b', '#2e8b57', '#d4a017', '#7d3c98', '#d35400', '#16a085', '#5d6d7e'];
-const EMOTES = ['smile', 'laugh', 'sad', 'angry'], EMOTE_GAP = 600; // ms between one player's emotes
+const EMOTES = ['smile', 'laugh', 'sad', 'angry', 'shock', 'facepalm', 'heart'], EMOTE_GAP = 600; // ms between one player's emotes
 const LOBBY_GRACE = 60_000; // live: ms a disconnected player keeps their lobby seat, so a refresh doesn't lose it
 const BETWEEN_ROUNDS = env('MILKKY_BETWEEN_SECONDS', 20) * 1000;  // live league: pause between rounds
 const ASYNC_BETWEEN_ROUNDS = env('MILKKY_ASYNC_BETWEEN_SECONDS', 120) * 1000; // async league: the same, a little longer

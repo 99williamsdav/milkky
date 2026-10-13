@@ -74,6 +74,10 @@ B.send({ t: 'emote', match: started.match, e: 'rude' });
 B.send({ t: 'emote', match: 'nope', e: 'sad' });
 await new Promise(r => setTimeout(r, 300));
 check(![...A.inbox, ...B.inbox].some(m => m.t === 'emote'), 'emotes sent too fast, unknown, or to another game are dropped');
+await new Promise(r => setTimeout(r, 400)); // (past the gap since Alice's last)
+const got = [];
+for (const e of ['shock', 'facepalm', 'heart']) { B.send({ t: 'emote', match: started.match, e }); got.push((await A.next(is('emote'))).e); await B.next(is('emote')); await new Promise(r => setTimeout(r, 650)); }
+check(got.join() === 'shock,facepalm,heart', `the new emotes get through (${got.join(', ')})`);
 
 let wrongTurnChecked = false, badThrowChecked = false, rejoinChecked = false, throwsSeen = 0;
 const me = { 0: A, 1: B };

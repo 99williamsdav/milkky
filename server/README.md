@@ -82,7 +82,7 @@ then in `/etc/milkky/<env>.env`: `MILKKY_VAPID_PUBLIC=...`, `MILKKY_VAPID_PRIVAT
 | `next` | | host: start the next league round (or career step) now |
 | `watch` | `match` (or null to stop) | watch another fixture; replies with its `sync` (your own match: back into it) |
 | `aim` | `aim`, `pull` | current thrower's live aim, relayed to others |
-| `emote` | `match`, `e` (`smile`/`laugh`/`sad`/`angry`) | a quick face to everyone playing or watching that game (at most one every 0.6 s) |
+| `emote` | `match`, `e` (`smile`/`laugh`/`sad`/`angry`/`shock`/`facepalm`/`heart`) | a quick face to everyone playing or watching that game (at most one every 0.6 s) |
 | `throw` | `dist` (m), `aim` (rad) | current thrower; clamped to 0.5–9.5 m and ±0.55 rad |
 
 `leave?` on `create`/`join` is the `{ code, token }` of a seat held in another room. It is given up only once the new room has let you in.
