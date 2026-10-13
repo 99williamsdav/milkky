@@ -88,11 +88,12 @@ function useBottlesFor(variant, players = 2) {
   resetBottles();
 }
 
-function startGame(types) {
+// first: who throws first (a Milkkshake played again keeps everyone's flavour and moves the first throw on)
+function startGame(types, first = 0) {
   lastSetup = types.slice();
   game.players = createPlayers(types);
   mode = 'quick'; game.target = chosenTarget; game.variant = chosenVariant;
-  launch(0);
+  launch(first);
 }
 // The game's worm: each player's score after each of their throws (game.log: [player, score after, missed])
 function gameWorm(g) {
@@ -111,7 +112,7 @@ function gameWorm(g) {
   return series.some(s => s.points.length) ? wormHTML(series, { max: g.target, target: g.target }) : '';
 }
 function launch(first) {
-  game.cur = first; game.winner = null; game.draw = false; game.log = []; physics.removeStick(); useBottlesFor(game.variant, game.players.length);
+  game.first = first; game.cur = first; game.winner = null; game.draw = false; game.log = []; physics.removeStick(); useBottlesFor(game.variant, game.players.length);
   ['#setup', '#over', '#league'].forEach(s => $(s).hidden = true);
   game.battle = null; game.shake = null;
   if (game.variant === 'battle') {
@@ -122,7 +123,7 @@ function launch(first) {
     newShake(game, first, { decisive: mode === 'league' }); // a career game needs a winner
     Achv.gameLeft();
     const who = game.players.map((p, i) => `${p.name} ${FLAVOUR_NAME[FLAVOURS[i]].toLowerCase()}`).join(', ');
-    toast(`Milkkshake! ${who}. Hit only yours to throw again.`, 3200, true);
+    toast(`Milkkshake! ${who}. ${game.players[first].name} ${verb(game.players[first], 'throws', 'throw')} first; hit only yours to throw again.`, 3200, true);
   } else Achv.gameStarted(game.players.map(p => !p.cpu)); // on this device, every person's throws count
   beginTurn();
 }
@@ -368,6 +369,12 @@ function showOver() {
   }
   $('#overWorm').innerHTML = gameWorm(game);
   $('#againBtn').textContent = mode === 'league' ? 'Continue' : mode === 'online' ? 'Back to room' : 'Play again';
+  // A Milkkshake: play again with the same flavours, the next player throwing first (online: the host starts it)
+  const next = game.shake ? game.players[((game.first ?? 0) + 1) % game.players.length] : null;
+  if (next && mode === 'quick') $('#againBtn').textContent = `Play again · ${next.name} first`;
+  const replay = next && mode === 'online' && online.room?.mode === 'game';
+  $('#overReplay').hidden = !replay || online.room.you !== online.room.host;
+  if (replay) $('#overReplay').textContent = `Play again · ${next.name} first`;
   $('#overNew').textContent = mode === 'online' ? 'Leave room' : 'Change players';
   $('#overNew').hidden = mode === 'league';
   $('#over').hidden = false;
@@ -947,6 +954,7 @@ function applyGame(g) {
   game.players = g.players.map(p => ({ ...p }));
   game.log = g.log || [];
   game.battle = g.battle || null;
+  if (g.first != null) game.first = g.first;
   game.shake = g.shake || null; game.draw = !!g.draw;
   game.cur = g.cur; game.target = g.target;
   game.winner = g.winner >= 0 ? game.players[g.winner] : null;
@@ -1572,8 +1580,9 @@ $('#startBtn').onclick = () => startGame(slots);
 $('#againBtn').onclick = () => {
   if (mode === 'online') return showLobby();
   if (mode === 'league') { finishLeagueMatch(); openLeague(); }
-  else startGame(lastSetup);
+  else startGame(lastSetup, game.shake ? ((game.first ?? 0) + 1) % game.players.length : 0);
 };
+$('#overReplay').onclick = () => net.send({ t: 'start' }); // (the server moves the first throw on)
 $('#leagueBtn').onclick = openLeague;
 $('#lgPlay').onclick = playLeagueMatch;
 $('#lgMenu').onclick = () => { $('#league').hidden = true; $('#setup').hidden = false; };

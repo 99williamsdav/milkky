@@ -68,6 +68,13 @@ check(start.poses.length === 24 && start.game.shake, 'the game starts with 24 bo
 check(last.game.winner >= 0 || last.game.draw, 'it ends with a winner (or a draw)');
 check(ok, 'every bottle knocked over is parked, and only those');
 check(last.game.players.every((p, i) => p.score === 12 - (12 - s.removed.filter(n => flavourOf(n) === (i ? 'blueberry' : 'strawberry')).length)), 'scores are each flavour cleared');
+// Playing again: the same flavours (seat order), the next player throwing first
+const firstStart = start;
+A.send({ t: 'start' });
+const again = await A.next(m => m.t === 'start' && m !== firstStart);
+check(again.game.first === 1 && again.game.cur === 1 && again.game.players.map(p => p.name).join() === firstStart.game.players.map(p => p.name).join(),
+  `play again: same players and flavours, ${again.game.players[1].name} throws first this time`);
+A.onMessage = null; // (Alice stops playing; the rest of the test doesn't need this game)
 
 // ---------- 3 and 4 players ----------
 // Every rack is fair: each flavour has the same share of each row and the same average distance and sideways spread

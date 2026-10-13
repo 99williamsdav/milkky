@@ -42,7 +42,7 @@ export class Match {
     this.game = {
       // Bots play at their level, or (career bots) their own skill
       players: seats.map((s, i) => newPlayer(s.name, s.cpu ? s.ai || LEVELS[s.cpu] : null, COLORS[i])),
-      cur: first, target, winner: null,
+      cur: first, first, target, winner: null,
       log: [], // every throw so far, for the worm: [player index, their score after it, 1 if a miss]
     };
     if (variant === 'battle') newBattle(this.game, first);
@@ -65,7 +65,7 @@ export class Match {
   publicGame() {
     const g = this.game;
     return {
-      cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1, log: [...g.log],
+      cur: g.cur, first: g.first ?? 0, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1, log: [...g.log],
       battle: g.battle ? JSON.parse(JSON.stringify(g.battle)) : null,
       shake: g.shake ? JSON.parse(JSON.stringify(g.shake)) : null, draw: !!g.draw,
       players: g.players.map((p, i) => {
@@ -251,7 +251,7 @@ export class Match {
       autopilot: this.autopilot, deadline: this.turnInfo && !this.turnInfo.cpu ? this.deadline : null,
       seats: this.seats.map(seatRef),
       game: {
-        cur: g.cur, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
+        cur: g.cur, first: g.first ?? 0, target: g.target, winner: g.winner ? g.players.indexOf(g.winner) : -1,
         players: g.players.map(p => ({ score: p.score, misses: p.misses, out: p.out })), log: g.log, battle: g.battle || null, shake: g.shake || null, draw: !!g.draw,
       },
       poses: snapshot(this.physics),
@@ -264,7 +264,7 @@ export class Match {
     if (d.seq) Object.assign(m, { seq: d.seq, history: d.history || [], base: d.base || null, seen: d.seen || m.seen });
     d.game.players.forEach((p, i) => Object.assign(m.game.players[i], p));
     m.game.winner = d.game.winner >= 0 ? m.game.players[d.game.winner] : null;
-    m.game.log = d.game.log || [];
+    m.game.log = d.game.log || []; m.game.first = d.game.first ?? 0;
     m.game.battle = d.game.battle || null;
     m.game.shake = d.game.shake || null; m.game.draw = !!d.game.draw;
     m.physics.bottles.forEach((b, i) => {

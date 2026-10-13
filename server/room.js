@@ -361,7 +361,9 @@ export class Room {
     if (this.mode === 'career') return this.startCareer();
     this.league = null;
     this.phase = 'playing';
-    this.matches = [new Match(this, 'game', [...this.seats], { ...this.matchOptions(), onOver: () => this.gameOver() })];
+    // A Milkkshake played again keeps everyone's flavour (it follows seat order) and moves the first throw on a seat
+    const first = this.variant === 'milkshake' ? (this.shakeFirst = ((this.shakeFirst ?? -1) + 1) % this.seats.length) : 0;
+    this.matches = [new Match(this, 'game', [...this.seats], { ...this.matchOptions(), first, onOver: () => this.gameOver() })];
     this.broadcastRoom();
     this.matches[0].start();
   }
@@ -552,7 +554,7 @@ export class Room {
     const entryOf = seat => lg ? lg.entries.findIndex(e => e.seat === seat) : -1;
     const seatRef = seat => this.seats.includes(seat) ? { s: this.seatIndex(seat) } : seat.cpu === 'career' ? { bot: seat.bot } : { e: entryOf(seat) };
     return {
-      v: 1, code: this.code, origin: this.origin, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target, variant: this.variant,
+      v: 1, code: this.code, origin: this.origin, mode: this.mode, pace: this.pace, phase: this.phase, target: this.target, variant: this.variant, shakeFirst: this.shakeFirst ?? null,
       nextRoundAt: this.nextRoundAt || null, roundEndsAt: this.roundEndsAt || null, updatedAt: this.updatedAt, lastVisit: this.lastVisit,
       seats: this.seats.map(s => ({ name: s.name, cpu: s.cpu, bot: s.bot || null, token: s.token, me: s.me || null, left: !!s.left, pid: s.pid || null })),
       career: this.career, stepResults: this.stepResults, careerStats: this.careerStats,
@@ -571,7 +573,7 @@ export class Room {
   static restore(d, RAPIER) {
     const room = new Room(d.code, RAPIER);
     const back = Date.now() + RESTART_GRACE;
-    Object.assign(room, { origin: d.origin || null, mode: d.mode, pace: d.pace || 'live', phase: d.phase, target: d.target, variant: d.variant || 'classic', nextRoundAt: d.nextRoundAt,
+    Object.assign(room, { origin: d.origin || null, mode: d.mode, pace: d.pace || 'live', phase: d.phase, target: d.target, variant: d.variant || 'classic', shakeFirst: d.shakeFirst ?? undefined, nextRoundAt: d.nextRoundAt,
       emptySince: Date.now(), updatedAt: d.updatedAt || Date.now(), lastVisit: d.lastVisit || Date.now(),
       career: d.career || null, stepResults: d.stepResults || {}, careerStats: d.careerStats || {} });
     room.seats = d.seats.map(s => ({ ...s, ws: null, connected: !!s.cpu, awaySince: back }));
