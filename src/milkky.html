@@ -86,6 +86,13 @@ body{height:100%;background:var(--sky);color:var(--ink);
 .emotetray[hidden]{display:none}
 .emotetray button{font-size:24px;line-height:1;padding:6px;border:none;background:none;border-radius:50%}
 .emotetray button:active{transform:scale(.9)}
+/* Replays: a bar while one plays (what it is, Save, Skip) */
+#replayBar{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 64px);transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:8px;
+  background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 14px;font-size:14px;font-weight:600;white-space:nowrap;max-width:calc(100% - 32px)}
+#replayBar[hidden]{display:none}
+#replayBar span{overflow:hidden;text-overflow:ellipsis}
+#replayBar button{font-size:13px;padding:5px 12px}
+#shotsList .fx{align-items:center}
 #emoteFeed{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:6}
 .emote{position:absolute;bottom:22%;display:flex;flex-direction:column;align-items:center;animation:emoteUp 2.6s ease-out forwards}
 .emote .face{font-size:44px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
@@ -325,6 +332,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="achvPop" role="status" aria-live="polite"></div>
     <div id="emoteFeed"></div>
+    <div id="replayBar" hidden><span id="replayLabel"></span><button id="replaySave">Save</button><button id="replaySkip">Skip</button></div>
     <div class="bottom">
       <div class="menu" id="menu" hidden>
         <button id="hubBtn" hidden>League</button>
@@ -335,6 +343,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
         <button data-e="smile" aria-label="Smile">😊</button><button data-e="laugh" aria-label="Laugh">😂</button><button data-e="sad" aria-label="Sad">😢</button><button data-e="angry" aria-label="Angry">😠</button><button data-e="shock" aria-label="Shocked">😱</button><button data-e="facepalm" aria-label="Facepalm">🤦</button><button data-e="heart" aria-label="Heart">❤️</button>
       </div>
       <div class="btns">
+        <button id="replayBtn" hidden>Replay</button>
         <button id="emoteBtn" hidden aria-expanded="false" aria-controls="emoteTray" aria-label="Emotes">😊</button>
         <button id="viewBtn">Look at bottles</button>
         <button id="menuBtn" aria-expanded="false" aria-controls="menu">Menu</button>
@@ -360,6 +369,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div id="slots"></div>
       <div class="row"><button class="primary" id="startBtn">Quick game</button><button id="leagueBtn">Career Mode</button><button id="trainBtn">Training</button><button id="onlineBtn">Play online</button><button id="mineBtn" hidden>My games</button><button id="setupRules">Rules</button></div>
       <button class="achbtn" id="achBtn">Achievements</button>
+      <button class="achbtn" id="shotsBtn" hidden>Saved shots</button>
     </div>
   </div>
 
@@ -448,6 +458,14 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div id="lgCupResults"></div>
       <div id="lgNext"></div>
       <div class="row"><button class="primary" id="lgPlay">Play match</button><button id="lgStats">Stats</button><button id="lgMenu">Menu</button><button id="lgReset">Start over</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="shots" hidden>
+    <div class="card wide">
+      <h2>Saved shots</h2>
+      <div class="fixtures" id="shotsList"></div>
+      <div class="row"><button class="primary" id="shotsBack">Back</button></div>
     </div>
   </div>
 

@@ -17,6 +17,7 @@ import { faceSVG } from './faces.js';
 import * as Achv from './achievements.js';
 import * as Push from './push.js';
 import { wormHTML } from './worm.js';
+import * as Replay from './replay.js';
 import * as Stats from './careerstats.js';
 import { botById } from '../shared/roster.js';
 import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey, serverOverride } from './net.js';
@@ -227,6 +228,8 @@ function throwStick(speed, aim) {
   physics.throwStick(speed, aim);
   scene.add(stickMesh); stickMesh.rotation.set(0, 0, 0);
   state = 'flying'; flyTime = 0; calm = 0; landed = false; landRing.visible = false;
+  liveRec = Replay.startRecording(bottles, physics.active, outOfGame(), game.variant, game.players.length); // (for replays)
+  Replay.sample(liveRec, bottles, physics.stick, 0, true);
 }
 
 let dragging = false, samples = [], startY = 0, curAim = 0;
@@ -241,6 +244,7 @@ function updateAimLine(aim) {
   aimGeo.setFromPoints([a, b]); aimLine.computeLineDistances();
 }
 canvas.addEventListener('pointerdown', e => {
+  if (state === 'replay') return endReplay(); // a tap skips a replay
   if (state !== 'aim') return;
   dragging = true; canvas.setPointerCapture(e.pointerId);
   startY = e.clientY; samples = [{ t: performance.now(), x: e.clientX, y: e.clientY }];
@@ -283,6 +287,96 @@ function release(e, cancel) {
 canvas.addEventListener('pointerup', e => release(e, false));
 canvas.addEventListener('pointercancel', e => release(e, true));
 
+// ---------- Replays ----------
+// The throw being recorded now (local throws), the last throw's recording, and a highlight waiting to be replayed
+let liveRec = null, lastRec = null, pendingHighlight = null;
+const outOfGame = () => game.battle?.removed || game.shake?.removed || [];
+// Is this throw a highlight? (thrower's index, new bottles knocked over, Siege role, first touch, needle, where the
+// bottles stood before)
+function highlightOf(thrower, fallen, role, hit, needle, before) {
+  const single = fallen.length === 1 ? before[fallen[0]] : null, mine = game.shake && flavourOfPlayer(thrower);
+  const own = game.shake ? fallen.filter(n => bottles.find(p => p.num === n)?.flavour === mine).length : 0;
+  return Replay.highlightFor({
+    winner: !!game.winner && game.winner === game.players[thrower],
+    variant: game.shake ? 'milkshake' : game.battle ? 'battle' : 'classic', fallen, role, own, clean: own === fallen.length,
+    hit, needle, distance: single ? Math.hypot(single.x - RELEASE.x, single.z - RELEASE.z) : 0,
+  });
+}
+// Play a recording (slow motion by default) over the scene as it is, then put everything back and carry on (then)
+let replay = null;
+const REPLAY_SLOW = 0.45;
+function playReplay(rec, { label = '', speed = REPLAY_SLOW, then = null } = {}) {
+  if (!rec) return then?.();
+  const saved = { poses: bottles.map(p => Replay.poseOf(p.body)), vis: bottles.map(p => [p.mesh.visible, p.label.visible]), state, physicsOn,
+    ring: landRing.visible, view: viewBottles, ringAt: landRing.position.clone() };
+  rec.before.forEach((ps, i) => {
+    const [x, y, z, qx, qy, qz, qw] = ps, b = bottles[i].body;
+    b.setTranslation({ x, y, z }, false); b.setRotation({ x: qx, y: qy, z: qz, w: qw }, false);
+  });
+  const out = new Set(rec.hidden);
+  bottles.forEach((p, i) => { const on = i < rec.before.length && !out.has(p.num); p.mesh.visible = on; p.label.visible = on && !p.flavour; });
+  physicsOn = false; aimLine.visible = false; landRing.visible = false; landed = false; viewBottles = false; dragging = false;
+  scene.add(stickMesh); stickMesh.visible = true;
+  state = 'replay'; flyTime = 0;
+  replay = { rec, t: 0, speed, saved, then, label };
+  $('#replayLabel').textContent = `${speed < 1 ? 'Slow motion' : 'Replay'}${label ? ` · ${label}` : ''}`;
+  $('#replayBar').hidden = false;
+}
+function stepReplay(dt) {
+  replay.t += dt * replay.speed; flyTime = replay.t;
+  const len = Replay.recordingLength(replay.rec);
+  playRecording(replay.rec, Math.min(replay.t, len));
+  if (replay.t > len + 0.35) endReplay();
+}
+function endReplay() {
+  const { saved, then } = replay;
+  replay = null;
+  bottles.forEach((p, i) => {
+    const [x, y, z, qx, qy, qz, qw] = saved.poses[i];
+    p.body.setTranslation({ x, y, z }, false); p.body.setRotation({ x: qx, y: qy, z: qz, w: qw }, false);
+    p.body.setLinvel({ x: 0, y: 0, z: 0 }, false); p.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
+    [p.mesh.visible, p.label.visible] = saved.vis[i];
+  });
+  landRing.visible = saved.ring; landRing.position.copy(saved.ringAt); viewBottles = saved.view;
+  physicsOn = saved.physicsOn; state = saved.state;
+  $('#replayBar').hidden = true;
+  if (then) then(); else setStickHeld();
+}
+$('#replaySkip').onclick = () => { if (replay) endReplay(); };
+$('#replaySave').onclick = () => {
+  if (!replay) return;
+  const ok = Replay.saveShot(replay.rec, { label: replay.label || replay.rec.meta?.caption || 'A shot', who: replay.rec.meta?.who || '' });
+  toast(ok ? 'Shot saved: it\'s in Saved shots on the main menu' : 'Couldn\'t save: your browser\'s storage is full', 2200, true);
+  refreshShotsBtn();
+};
+$('#replayBtn').onclick = () => { if (lastRec && (state === 'aim' || state === 'remote')) playReplay(lastRec, { label: lastRec.meta?.caption || '' }); };
+
+// Saved shots: a list on the main menu
+function refreshShotsBtn() { $('#shotsBtn').hidden = !Replay.loadShots().length; }
+function openShots() {
+  const shots = Replay.loadShots();
+  $('#shotsList').innerHTML = shots.length ? shots.map(s => `<div class="fx"><span class="what"><b>${esc(s.label)}</b>
+      <span class="status">${esc(s.who)}${s.who ? ' · ' : ''}${new Date(s.rec.when).toLocaleDateString()}${s.rec.variant !== 'classic' ? ` · ${VARIANT_NAME[s.rec.variant]}` : ''}</span></span>
+      <span><button class="primary" data-play="${s.id}">Watch</button> <button data-del="${s.id}" aria-label="Delete">✕</button></span></div>`).join('')
+    : '<p class="sub">No saved shots yet. Save one while it\'s replaying.</p>';
+  ['#setup'].forEach(sel => $(sel).hidden = true);
+  $('#shots').hidden = false;
+}
+$('#shotsBtn').onclick = openShots;
+$('#shotsBack').onclick = () => { $('#shots').hidden = true; $('#setup').hidden = false; };
+$('#shotsList').addEventListener('click', e => {
+  const play = e.target.closest('[data-play]'), del = e.target.closest('[data-del]');
+  if (del) { Replay.deleteShot(del.dataset.del); refreshShotsBtn(); return openShots(); }
+  if (!play) return;
+  const shot = Replay.loadShots().find(s => s.id === play.dataset.play);
+  if (!shot) return;
+  $('#shots').hidden = true;
+  game.battle = game.shake = null;
+  useBottlesFor(shot.rec.variant, shot.rec.players); // (the bottles that shot was played with)
+  playReplay(shot.rec, { label: shot.label, then: () => { useBottlesFor('classic'); state = 'menu'; setStickHeld(); openShots(); } });
+});
+refreshShotsBtn();
+
 // ---------- Computer players ----------
 let cpu = null;
 function cpuPlan(pl) {
@@ -308,7 +402,13 @@ function resolveThrow() {
   const fallen = physics.fallenBottles();
   fallen.forEach(p => p.label.material.color.set(0xff6b5b));
   const thrower = game.cur, before = game.players[thrower], scoreBefore = before.score, missesBefore = before.misses;
+  const role = game.battle && roleOf(game, thrower);
+  if (liveRec) { Replay.sample(liveRec, bottles, physics.stick, 0, true); lastRec = Replay.finishRecording(liveRec); liveRec = null; }
   const msg = scoreThrow(game, fallen.map(p => p.num));
+  if (lastRec && !training) {
+    lastRec.meta = { who: before.name, caption: msg };
+    pendingHighlight = highlightOf(thrower, fallen.map(p => p.num), role, physics.firstHit, physics.needle, throwFrom || {});
+  }
   game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]); // for the worm
   if (game.battle || game.shake) { toast(msg, 2200); renderBoard(); state = 'scoring'; phaseT = 0; return; } // (no classic stats or achievements)
   if (mode === 'league' && careerTally && thrower === 0) Stats.recordThrow(careerTally, fallen.map(p => p.num), scoreBefore, game.target);
@@ -344,6 +444,12 @@ function finishRestand() {
   bottles.forEach(p => p.label.material.color.set(0xffffff));
   tween = null; physicsOn = true;
   if (mode === 'online') return finishOnlineThrow();
+  // A highlight: watch it again in slow motion, then carry on
+  if (pendingHighlight) { const label = pendingHighlight; pendingHighlight = null; return playReplay(lastRec, { label, then: afterThrow }); }
+  afterThrow();
+}
+// After a local throw has been scored and the bottles stood up: the next turn (or the end)
+function afterThrow() {
   // Battle: the first leg is over, so a fresh rack for the second
   if (game.battle?.resetRack) {
     game.battle.removed = []; game.battle.resetRack = false; resetBottles();
@@ -534,7 +640,7 @@ League.load();
 // several at once, so we show one (our own, or one we're watching) and ignore the others' messages.
 // online.view: entry | lobby | game (our match) | watch (someone else's) | hub (league screen) | over
 let online = null, net = null;
-const ANIMATING = ['flying', 'scoring', 'restand'];
+const ANIMATING = ['flying', 'scoring', 'restand', 'replay'];
 // (The server sends the stick as the body after the bottles in play: 12, or 24 in a Milkkshake.)
 const NAME_KEY = 'milkky-name';
 const GAME_MESSAGES = new Set(['start', 'sync', 'turn', 'throw', 'aim', 'status']);
@@ -937,7 +1043,8 @@ function playHeld() {
 const renderingStopped = () => document.hidden || performance.now() - lastFrameAt > 1000;
 function catchUp() {
   for (;;) {
-    if (state === 'flying') resolveOnlineThrow();
+    if (state === 'replay') endReplay();
+    else if (state === 'flying') resolveOnlineThrow();
     else if (state === 'scoring') startRestand();
     else if (state === 'restand') finishRestand();
     else if (online.queue.length) pumpOnline();
@@ -1025,7 +1132,9 @@ function onlineThrow(m) {
   aimLine.visible = false; cpu = null; online.turnEndsAt = null;
   online.play = m; online.lastThrower = m.seat;
   const p = game.players[m.seat];
-  online.throwFrom = { before: bottlePlaces(), scoreBefore: p?.score ?? 0, missesBefore: p?.misses ?? 0 };
+  online.throwFrom = { before: bottlePlaces(), scoreBefore: p?.score ?? 0, missesBefore: p?.misses ?? 0, role: game.battle && roleOf(game, m.seat) };
+  lastRec = Replay.fromOnline(m, bottles.slice(0, physics.active).map(b => Replay.poseOf(b.body)), outOfGame(), game.shake ? 'milkshake' : game.battle ? 'battle' : 'classic', game.players.length);
+  lastRec.meta = { who: p?.name ?? '', caption: m.msg };
   scene.add(stickMesh); stickMesh.visible = true;
   state = 'flying'; flyTime = 0; landed = false; landRing.visible = false;
   updateCountdown();
@@ -1033,8 +1142,10 @@ function onlineThrow(m) {
 }
 // Show the recording at time t (seconds), smoothing between frames.
 const pa = new THREE.Vector3(), pb = new THREE.Vector3(), qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
-function playFrame(t) {
-  const m = online.play, last = m.frames.length - 1;
+function playFrame(t) { playRecording(online.play, t); }
+// Show a recording (an online throw, or a replay) at time t (seconds), smoothing between frames
+function playRecording(m, t) {
+  const last = m.frames.length - 1;
   const f = Math.min(last, t * m.fps), i = Math.max(0, Math.min(last - 1, Math.floor(f))), k = Math.min(1, f - i);
   const A = m.frames[i], B = m.frames[Math.min(last, i + 1)];
   m.bodies.forEach((b, j) => {
@@ -1071,6 +1182,8 @@ function resolveOnlineThrow() {
       players: game.players, scoreBefore: f.scoreBefore, missesBefore: f.missesBefore, winner: m.game.winner, over: m.over });
     if (m.over && game.players.some((p, i) => !p.cpu && !isMe(i))) Achv.unlock('goodCompany');
   }
+  const f = online.throwFrom;
+  pendingHighlight = renderingStopped() ? null : highlightOf(m.seat, m.fallen, f.role, m.hit, m.needle, f.before);
   toast(m.msg, 2200); renderBoard();
   state = 'scoring'; phaseT = 0;
 }
@@ -1088,9 +1201,15 @@ function finishOnlineThrow() {
     syncBattleBottles();
     if (online.newLeg) { online.newLeg = false; const p = game.players[m.game.cur]; toast(`Leg 2: ${p.name} ${verb(p, 'attacks', 'attack')}. ${chaseText(game)}`, 3000, true); }
   }
-  if (m.over) return isMulti(online.room) ? showHub() : showOver();
-  game.cur = m.game.cur;
-  state = 'remote'; // the next turn message is already queued
+  const next = () => {
+    if (m.over) return isMulti(online.room) ? showHub() : showOver();
+    game.cur = m.game.cur;
+    state = 'remote'; // the next turn message is already queued
+  };
+  // A highlight: everyone in the game sees it again in slow motion (what comes next waits in the queue)
+  if (pendingHighlight && !renderingStopped()) { const label = pendingHighlight; pendingHighlight = null; return playReplay(lastRec, { label, then: next }); }
+  pendingHighlight = null;
+  next();
 }
 
 $('#onCreate').onclick = () => { const name = entryName(); if (name) connect({ t: 'create', name }); };
@@ -1470,12 +1589,12 @@ function bottleCentre() {
   return n ? c.multiplyScalar(1 / n) : HOME_C.clone();
 }
 function updateCamera(dt) {
-  const throwView = ['aim', 'cpu', 'menu', 'remote', 'sent'].includes(state) || (state === 'flying' && flyTime < 0.3);
+  const throwView = ['aim', 'cpu', 'menu', 'remote', 'sent'].includes(state) || ((state === 'flying' || state === 'replay') && flyTime < 0.3);
   const follow = viewBottles || !throwView;
   let tp, tl;
   if (follow) { const c = training && training.kind !== 'strike' ? training.target.clone() : bottleCentre(); tp = c.clone().add(V(0, 0.8, 1.4)); tl = c.clone().add(V(0, 0.02, -0.1)); }
   else { tp = THROW_POS; tl = THROW_LOOK; }
-  const k = 1 - Math.exp(-dt * (state === 'flying' ? 1.6 : 3));
+  const k = 1 - Math.exp(-dt * (state === 'flying' ? 1.6 : state === 'replay' ? 1.6 * replay.speed : 3));
   camPos.lerp(tp, k); camLook.lerp(tl, k);
   camera.position.copy(camPos); camera.lookAt(camLook);
 }
@@ -1495,6 +1614,7 @@ function frame(now) {
   if (physicsOn && mode !== 'online') physics.advance(dt);
   if (mode === 'online' && online) { pumpOnline(); updateCountdown(); }
   if (state === 'cpu' && cpu) cpuTick(dt);
+  if (state === 'replay' && replay) stepReplay(dt);
   if (state === 'flying') {
     flyTime += dt;
     if (mode === 'online') {
@@ -1502,6 +1622,7 @@ function frame(now) {
       if (flyTime >= playLength(online.play)) resolveOnlineThrow();
     } else {
       calm = physics.isMoving() ? 0 : calm + dt;
+      if (liveRec) Replay.sample(liveRec, bottles, physics.stick, dt);
       if ((calm > 0.6 && flyTime > 0.8) || flyTime > 12) (training ? resolveTraining : resolveThrow)();
     }
   } else if (state === 'scoring') {
@@ -1522,7 +1643,10 @@ function frame(now) {
     p.mesh.position.set(t.x, t.y, t.z); p.mesh.quaternion.set(r.x, r.y, r.z, r.w);
     p.label.position.set(t.x, t.y + 0.15, t.z);
   }
-  updateMilk(dt, bottles, state === 'flying' || state === 'scoring');
+  updateMilk(dt, bottles, state === 'flying' || state === 'scoring' || state === 'replay');
+  // Replay your last throw: when it's a throw's start (yours, or watching someone else's)
+  const canReplay = !!lastRec && (state === 'aim' || state === 'remote') && mode !== 'training';
+  if ($('#replayBtn').hidden === canReplay) $('#replayBtn').hidden = !canReplay;
   const stick = physics.stick;
   if (stick) {
     const t = stick.translation(), r = stick.rotation();
