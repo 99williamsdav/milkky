@@ -20,7 +20,7 @@ import { wormHTML } from './worm.js';
 import * as Replay from './replay.js';
 import * as Stats from './careerstats.js';
 import { botById } from '../shared/roster.js';
-import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey, serverOverride } from './net.js';
+import { createNet, savedRoom, fetchMine, hasKey, myKey, setKey, validKey, serverOverride, ask } from './net.js';
 import { renderHub, renderTicker, myFixture, esc } from './hub.js';
 import { renderCareerHub, careerAchievements as careerAchievementsOnline } from './careerhub.js';
 
@@ -349,6 +349,23 @@ $('#replaySave').onclick = () => {
   toast(ok ? 'Shot saved: it\'s in Saved shots on the main menu' : 'Couldn\'t save: your browser\'s storage is full', 2200, true);
   refreshShotsBtn();
 };
+// Sharing a shot: upload it once (the link is reused after that), then the phone's share sheet, or copy the link
+const replayLink = id => { const u = new URL('replay', location.href), server = serverOverride(); u.searchParams.set('id', id); if (server) u.searchParams.set('server', server); return u.href; };
+async function shareShot(rec, label, who) {
+  let id = Replay.sharedIdOf(rec);
+  if (!id) {
+    toast('Sharing…', 4000, true);
+    try {
+      const r = await ask({ t: 'shareShot', shot: { rec: { ...rec, meta: undefined, sharedId: undefined }, label, who } }, 'sharedShot');
+      if (!r.id) return toast(r.msg || 'That shot couldn’t be shared', 2500, true);
+      id = r.id; rec.sharedId = id; Replay.markShared(rec, id);
+    } catch (e) { return toast('Can’t reach the game server just now', 2500, true); }
+  }
+  const url = replayLink(id), text = `${label}${who ? ` (${who})` : ''}: watch it on Milkky`;
+  if (navigator.share) { try { await navigator.share({ title: 'Milkky', text, url }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+  try { await navigator.clipboard.writeText(url); toast('Link copied: send it to anyone', 2200, true); } catch (e) { toast(url, 6000, true); }
+}
+$('#replayShare').onclick = () => { if (replay) shareShot(replay.rec, replay.label || replay.rec.meta?.caption || 'A shot', replay.rec.meta?.who || ''); };
 $('#replayBtn').onclick = () => { if (lastRec && (state === 'aim' || state === 'remote')) playReplay(lastRec, { label: lastRec.meta?.caption || '' }); };
 
 // Saved shots: a list on the main menu
@@ -357,7 +374,7 @@ function openShots() {
   const shots = Replay.loadShots();
   $('#shotsList').innerHTML = shots.length ? shots.map(s => `<div class="fx"><span class="what"><b>${esc(s.label)}</b>
       <span class="status">${esc(s.who)}${s.who ? ' · ' : ''}${new Date(s.rec.when).toLocaleDateString()}${s.rec.variant !== 'classic' ? ` · ${VARIANT_NAME[s.rec.variant]}` : ''}</span></span>
-      <span><button class="primary" data-play="${s.id}">Watch</button> <button data-del="${s.id}" aria-label="Delete">✕</button></span></div>`).join('')
+      <span><button class="primary" data-play="${s.id}">Watch</button> <button data-share="${s.id}">Share</button> <button data-del="${s.id}" aria-label="Delete">✕</button></span></div>`).join('')
     : '<p class="sub">No saved shots yet. Save one while it\'s replaying.</p>';
   ['#setup'].forEach(sel => $(sel).hidden = true);
   $('#shots').hidden = false;
@@ -365,8 +382,9 @@ function openShots() {
 $('#shotsBtn').onclick = openShots;
 $('#shotsBack').onclick = () => { $('#shots').hidden = true; $('#setup').hidden = false; };
 $('#shotsList').addEventListener('click', e => {
-  const play = e.target.closest('[data-play]'), del = e.target.closest('[data-del]');
+  const play = e.target.closest('[data-play]'), del = e.target.closest('[data-del]'), share = e.target.closest('[data-share]');
   if (del) { Replay.deleteShot(del.dataset.del); refreshShotsBtn(); return openShots(); }
+  if (share) { const s = Replay.loadShots().find(x => x.id === share.dataset.share); if (s) shareShot(s.rec, s.label, s.who); return; }
   if (!play) return;
   const shot = Replay.loadShots().find(s => s.id === play.dataset.play);
   if (!shot) return;
@@ -376,6 +394,36 @@ $('#shotsList').addEventListener('click', e => {
   playReplay(shot.rec, { label: shot.label, then: () => { useBottlesFor('classic'); state = 'menu'; setStickHeld(); openShots(); } });
 });
 refreshShotsBtn();
+
+// A shared shot's link (/replay?id=...): watch it, then watch again, keep it, or play
+let sharedShot = null;
+async function openSharedShot(id) {
+  toast('Loading the shot…', 6000, true);
+  let r;
+  try { r = await ask({ t: 'getShot', id }, 'shot'); } catch (e) { r = null; }
+  $('#toast').classList.remove('show');
+  if (!r?.shot) { toast('That shot isn’t available any more', 2500, true); $('#setup').hidden = false; return; }
+  sharedShot = r.shot; sharedShot.rec.sharedId = id;
+  watchShared();
+}
+function watchShared() {
+  const s = sharedShot;
+  ['#setup', '#sharedShot'].forEach(sel => $(sel).hidden = true);
+  game.battle = game.shake = null;
+  useBottlesFor(s.rec.variant, s.rec.players);
+  playReplay(s.rec, { label: s.label, then: () => {
+    useBottlesFor('classic'); state = 'menu'; setStickHeld();
+    $('#ssTitle').textContent = s.label;
+    $('#ssSub').textContent = `${s.who ? `${s.who}, ` : ''}${new Date(s.when).toLocaleDateString()}${s.rec.variant !== 'classic' ? ` · ${VARIANT_NAME[s.rec.variant]}` : ''}`;
+    $('#sharedShot').hidden = false;
+  } });
+}
+$('#ssAgain').onclick = watchShared;
+$('#ssSave').onclick = () => { const ok = Replay.saveShot(sharedShot.rec, { label: sharedShot.label, who: sharedShot.who }); toast(ok ? 'Saved: it\'s in Saved shots' : 'Couldn\'t save: your browser\'s storage is full', 2000, true); refreshShotsBtn(); };
+$('#ssPlay').onclick = () => {
+  const u = new URL(location.href); u.searchParams.delete('id'); u.searchParams.delete('replay'); u.pathname = u.pathname.replace(/replay$/, ''); history.replaceState(null, '', u);
+  $('#sharedShot').hidden = true; $('#setup').hidden = false; refreshMineBtn();
+};
 
 // ---------- Computer players ----------
 let cpu = null;
@@ -1790,7 +1838,9 @@ if (meParam) {
 }
 // A refresh in an online game rejoins it; a link to a different room offers to join that one instead.
 const roomParam = (new URLSearchParams(location.search).get('room') || '').toUpperCase().slice(0, 4), current = savedRoom();
-if (current && (!roomParam || roomParam === current)) { enterOnline(); net.resume(); }
+const replayParam = new URLSearchParams(location.search).get('replay') || (/replay$/.test(location.pathname) ? new URLSearchParams(location.search).get('id') : null);
+if (replayParam) openSharedShot(String(replayParam).toUpperCase().slice(0, 6));
+else if (current && (!roomParam || roomParam === current)) { enterOnline(); net.resume(); }
 else if (roomParam) openOnline(roomParam);
 else if (meParam && validKey(meParam)) openMine();
 else { $('#setup').hidden = false; refreshMineBtn(); }

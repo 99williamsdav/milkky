@@ -332,7 +332,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="achvPop" role="status" aria-live="polite"></div>
     <div id="emoteFeed"></div>
-    <div id="replayBar" hidden><span id="replayLabel"></span><button id="replaySave">Save</button><button id="replaySkip">Skip</button></div>
+    <div id="replayBar" hidden><span id="replayLabel"></span><button id="replaySave">Save</button><button id="replayShare">Share</button><button id="replaySkip">Skip</button></div>
     <div class="bottom">
       <div class="menu" id="menu" hidden>
         <button id="hubBtn" hidden>League</button>
@@ -458,6 +458,14 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
       <div id="lgCupResults"></div>
       <div id="lgNext"></div>
       <div class="row"><button class="primary" id="lgPlay">Play match</button><button id="lgStats">Stats</button><button id="lgMenu">Menu</button><button id="lgReset">Start over</button></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="sharedShot" hidden>
+    <div class="card">
+      <h2 id="ssTitle">A shot</h2>
+      <p class="sub" id="ssSub"></p>
+      <div class="row"><button class="primary" id="ssAgain">Watch again</button><button id="ssSave">Save</button><button id="ssPlay">Play Milkky</button></div>
     </div>
   </div>
 

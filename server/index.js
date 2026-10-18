@@ -7,6 +7,7 @@ import RAPIER_MOD from '@dimforge/rapier3d-compat';
 import { Room, hashKey } from './room.js';
 import * as store from './store.js';
 import * as push from './push.js';
+import * as shots from './shots.js';
 
 const RAPIER = RAPIER_MOD.default || RAPIER_MOD;
 await RAPIER.init();
@@ -19,6 +20,9 @@ const ROOMS_PER_ADDRESS = env('MILKKY_ROOMS_PER_ADDRESS', 20); // rooms created 
 const MSG_RATE = 20, MSG_BURST = 60;             // messages per second per connection, and the burst allowed above that
 const EMPTY_ROOM_TTL = 2 * 60 * 1000;            // live: close a room this long after the last person leaves
 const ASYNC_IDLE_TTL = 14 * 24 * 3600 * 1000;    // async: close a finished (or never started) room after two quiet weeks
+const MSG_BYTES = 4096;                          // the most any message may be, except a shared shot (shots.MAX_BYTES)
+const SHARES_PER_HOUR = env('MILKKY_SHARES_PER_HOUR', 20); // shots one address can share an hour
+const shares = new Map();                        // address → times of its recent shares
 
 const rooms = new Map();
 function newCode() {
@@ -68,7 +72,7 @@ const server = http.createServer((req, res) => {
   if (req.url === '/health') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end(`ok ${rooms.size} rooms\n`); }
   res.writeHead(404); res.end();
 });
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4096, perMessageDeflate: true });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: shots.MAX_BYTES, perMessageDeflate: true });
 
 const send = (ws, msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
 function enter(ws, room, seat) {
@@ -94,6 +98,15 @@ function onMessage(ws, m) {
     const games = me ? [...rooms.values()].map(r => r.summaryFor(me)).filter(Boolean) : [];
     return send(ws, { t: 'mine', games });
   }
+  // Shared shots (any time): keep one and get a link id, or fetch one to watch
+  if (m.t === 'shareShot') {
+    const now = Date.now(), recent = (shares.get(ws.origin) || []).filter(t => now - t < 3600_000);
+    if (recent.length >= SHARES_PER_HOUR) return send(ws, { t: 'sharedShot', id: null, msg: 'You’ve shared a lot of shots in the last hour. Try again later.' });
+    const id = shots.share(m.shot);
+    if (id) shares.set(ws.origin, [...recent, now]);
+    return send(ws, { t: 'sharedShot', id, msg: id ? null : 'That shot couldn’t be shared' });
+  }
+  if (m.t === 'getShot') return send(ws, { t: 'shot', id: m.id, shot: shots.get(m.id) });
   // Push notifications (any time): the key to subscribe with (null: push is off), and (un)subscribing a device
   if (m.t === 'pushKey') return send(ws, { t: 'pushKey', key: push.publicKey });
   if (m.t === 'pushSubscribe') return send(ws, { t: 'pushSubscribed', ok: push.subscribe(hashKey(m.me), m.sub) });
@@ -150,6 +163,7 @@ wss.on('connection', (ws, req) => {
     let m;
     try { m = JSON.parse(data); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
+    if (data.length > MSG_BYTES && m.t !== 'shareShot') return; // only a shared shot may be big
     try { onMessage(ws, m); } catch (err) { console.error('message failed', m.t, err); send(ws, { t: 'error', msg: 'Server error' }); }
   });
   ws.on('close', () => { if (ws.room && ws.seat.ws === ws) ws.room.disconnect(ws.seat); });
@@ -168,6 +182,9 @@ setInterval(() => {
     if (idle) closeRoom(room);
   }
 }, 30_000).unref();
+// Once a day: delete shared shots nobody has watched for a long while
+shots.tidy();
+setInterval(shots.tidy, 24 * 3600_000).unref();
 
 server.listen(PORT, HOST, () => console.log(`milkky server on ${HOST}:${PORT} (${rooms.size} rooms restored from ${store.dataDir})`));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {

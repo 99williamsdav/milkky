@@ -67,6 +67,14 @@ export function saveShot(rec, meta) {
   shots.unshift({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ...meta, rec });
   try { localStorage.setItem(KEY, JSON.stringify(shots.slice(0, MAX_SHOTS))); return true; } catch (e) { return false; }
 }
+// A saved shot has been shared: remember its link id, so sharing it again reuses the link
+export function markShared(rec, sharedId) {
+  const shots = loadShots(), s = shots.find(x => x.rec.when === rec.when && x.rec.frames.length === rec.frames.length);
+  if (!s) return;
+  s.sharedId = sharedId;
+  try { localStorage.setItem(KEY, JSON.stringify(shots)); } catch (e) {}
+}
+export const sharedIdOf = rec => rec.sharedId || loadShots().find(x => x.rec.when === rec.when && x.rec.frames.length === rec.frames.length)?.sharedId || null;
 export function deleteShot(id) {
   try { localStorage.setItem(KEY, JSON.stringify(loadShots().filter(s => s.id !== id))); } catch (e) {}
 }

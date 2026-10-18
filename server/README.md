@@ -58,6 +58,7 @@ then in `/etc/milkky/<env>.env`: `MILKKY_VAPID_PUBLIC=...`, `MILKKY_VAPID_PRIVAT
 - `sim.js`: runs a throw to rest and records it.
 - `store.js`: saves rooms to disk and loads them at startup.
 - `push.js`: push subscriptions, and sending notifications.
+- `shots.js`: shared replays (`/replay?id=...`), kept in `shots/` in the data folder; unwatched for `MILKKY_SHOT_TTL_DAYS` (90): deleted.
 
 ## Client → server
 
@@ -67,6 +68,8 @@ then in `/etc/milkky/<env>.env`: `MILKKY_VAPID_PUBLIC=...`, `MILKKY_VAPID_PRIVAT
 | `join` | `code`, `name`, `me`, `leave?` | only between games (a career: any time); 4 seats for a game, 8 for a league, 16 for a career (already in it: back to your seat) |
 | `rejoin` | `code`, `token` or `me` | after a refresh (token from `joined`), or opening a game from My games (`me`) |
 | `mine` | `me` | your games across all rooms (any time, in a room or not) |
+| `shareShot` | `shot{rec, label, who}` | keep a replay for sharing by link (any time; up to 100 KB, 20 an hour per address) |
+| `getShot` | `id` | a shared replay (any time) |
 | `pushKey` | | the key to subscribe to notifications with (any time) |
 | `pushSubscribe` | `me`, `sub` (the browser's PushSubscription as JSON) | notifications for this device (any time) |
 | `pushUnsubscribe` | `me`, `endpoint` | no more notifications for this device |
@@ -92,6 +95,8 @@ then in `/etc/milkky/<env>.env`: `MILKKY_VAPID_PUBLIC=...`, `MILKKY_VAPID_PRIVAT
 | `t` | fields |
 |---|---|
 | `joined` | `code`, `token`, `you` (seat index) |
+| `sharedShot` | `id` (null, with `msg`, if it wasn't kept) |
+| `shot` | `id`, `shot{rec, label, who, when}` (null: unknown or expired) |
 | `pushKey` | `key` (null: push is off) |
 | `pushSubscribed` | `ok` |
 | `mine` | `games[{code, mode, pace, phase, target, you, host, players, league?{round, rounds, roundEndsIn, place}, career?{season, step, steps, waiting, tier, place, stepEndsIn}, match?{yourTurn, turnOf, unseen, deadline, over, players}}]` |
