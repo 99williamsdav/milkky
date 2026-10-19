@@ -243,15 +243,63 @@ function updateAimLine(aim) {
   const b = a.clone().add(V(Math.sin(aim), 0, -Math.cos(aim)).multiplyScalar(4.6));
   aimGeo.setFromPoints([a, b]); aimLine.computeLineDistances();
 }
+// Swipe trace (training): where your finger or mouse went, drawn over the lawn so you can study your form. The drag
+// down in white, the flick that set the length in gold (the last 0.15 s, as the throw reads it), with the length and
+// aim it gave, and faint ghosts of your last few swipes. The dashed line is dead straight.
+const swipeSvg = $('#swipe');
+let swipe = null, ghosts = [];
+const swipePath = pts => pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('');
+function drawSwipe() {
+  if (!training || (!swipe && !ghosts.length)) { swipeSvg.innerHTML = ''; return; }
+  const r = canvas.getBoundingClientRect();
+  let s = `<defs><marker id="swArrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+    <path d="M0 0L10 5L0 10z" fill="#ffc93c"/></marker></defs>
+    <line class="mid" x1="${r.width / 2}" y1="0" x2="${r.width / 2}" y2="${r.height}"/>`;
+  ghosts.forEach((g, i) => { s += `<path class="ghost" style="opacity:${(0.1 + 0.07 * i).toFixed(2)}" d="${swipePath(g.pts)}"/>`; });
+  if (swipe) {
+    const { pts, flick, label } = swipe, last = pts[pts.length - 1];
+    s += `<circle cx="${pts[0].x}" cy="${pts[0].y}" r="5"/>`;
+    s += `<path class="drag" d="${swipePath(flick == null ? pts : pts.slice(0, flick + 1))}"/>`;
+    if (flick != null) s += `<path class="flick" marker-end="url(#swArrow)" d="${swipePath(pts.slice(flick))}"/>`;
+    if (label) {
+      const right = last.x < r.width - 170;
+      s += `<text x="${last.x + (right ? 16 : -16)}" y="${Math.max(20, last.y)}" text-anchor="${right ? 'start' : 'end'}">${label}</text>`;
+    }
+  }
+  swipeSvg.innerHTML = s;
+}
+function swipePoint(e) {
+  const r = canvas.getBoundingClientRect(), ev = e.getCoalescedEvents?.() || [];
+  for (const c of ev.length ? ev : [e]) swipe.pts.push({ t: c.timeStamp, x: c.clientX - r.left, y: c.clientY - r.top });
+}
+function swipeStart(e) {
+  if (swipe) ghosts = [...ghosts, swipe].slice(-4);
+  swipe = { pts: [], flick: null, label: null };
+  swipePoint(e); drawSwipe();
+}
+// The throw has been read: from (a time) is where the flick began; got: the length and aim, or null if too slow
+function swipeEnd(e, from, got) {
+  swipePoint(e);
+  const i = swipe.pts.findIndex(p => p.t >= from);
+  swipe.flick = Math.min(Math.max(0, i < 0 ? swipe.pts.length - 2 : i), swipe.pts.length - 2);
+  if (swipe.flick < 0) swipe.flick = null;
+  const deg = got && Math.round(THREE.MathUtils.radToDeg(got.aim));
+  swipe.label = !got ? 'Too slow to throw' : `${got.dist.toFixed(1)} m · ${!deg ? 'straight' : `${Math.abs(deg)}° ${deg < 0 ? 'left' : 'right'}`}`;
+  drawSwipe();
+}
+function clearSwipes() { swipe = null; ghosts = []; drawSwipe(); }
+
 canvas.addEventListener('pointerdown', e => {
   if (state === 'replay') return endReplay(); // a tap skips a replay
   if (state !== 'aim') return;
   dragging = true; canvas.setPointerCapture(e.pointerId);
   startY = e.clientY; samples = [{ t: performance.now(), x: e.clientX, y: e.clientY }];
   curAim = aimFromX(e.clientX); updateAimLine(curAim); aimLine.visible = true;
+  if (training) swipeStart(e);
 });
 canvas.addEventListener('pointermove', e => {
   if (!dragging) return;
+  if (training) { swipePoint(e); drawSwipe(); }
   const now = performance.now();
   samples.push({ t: now, x: e.clientX, y: e.clientY });
   while (samples.length > 2 && now - samples[0].t > 250) samples.shift();
@@ -264,7 +312,7 @@ let lastAimSent = 0;
 function release(e, cancel) {
   if (!dragging) return;
   dragging = false; aimLine.visible = false;
-  if (cancel) { setStickHeld(); if (mode === 'online') net.send({ t: 'aim', aim: 0, pull: 0 }); return; }
+  if (cancel) { setStickHeld(); if (mode === 'online') net.send({ t: 'aim', aim: 0, pull: 0 }); if (training) { swipe = null; drawSwipe(); } return; }
   const now = performance.now();
   samples.push({ t: now, x: e.clientX, y: e.clientY });
   let recent = samples.filter(s => now - s.t <= 150);
@@ -272,9 +320,10 @@ function release(e, cancel) {
   const a = recent[0], b = recent[recent.length - 1];
   const dt = Math.max(0.016, (b.t - a.t) / 1000);
   const up = -(b.y - a.y) / dt / innerHeight; // screen heights per second, upward
-  if (up < 0.35) { setStickHeld(); toast('Flick upward to throw', 1500); return; }
+  if (up < 0.35) { setStickHeld(); toast('Flick upward to throw', 1500); if (training) swipeEnd(e, a.t, null); return; }
   // Flick sets intended distance (gentle curve), then solve for the launch speed that reaches it.
   const dist = THREE.MathUtils.clamp(3.6 * Math.pow(up / 2, 0.75), MIN_DIST, MAX_DIST);
+  if (training) swipeEnd(e, a.t, { dist, aim: curAim });
   const speed = launchSpeedFor(dist);
   if (mode === 'online') {
     // The server simulates it; hold the follow-through until its recording arrives.
@@ -1483,6 +1532,7 @@ function startTraining(kind) {
   physics.removeStick(); useBottlesFor('classic'); game.battle = game.shake = null; bottlesAway(true);
   const pb = readBest(kind); // your personal best in this mode, shown while you play and on the worm after
   training = { kind, throws: [], target: V(0, 0, 0), land: null, best: pb.total, bestThrows: pb.throws };
+  clearSwipes();
   nextTarget();
 }
 function nextTarget() {
@@ -1614,7 +1664,7 @@ function trainingWorm(pts, best, bestThrows, max) {
   return wormHTML(series, { max: Math.min(max, Math.ceil(top * 1.1 / 10) * 10), yLabel: 'Total' });
 }
 function exitTraining() {
-  training = null; targetMesh.visible = false; landRing.visible = false;
+  training = null; targetMesh.visible = false; landRing.visible = false; clearSwipes();
   physics.removeStick(); clearMilk(bottles); bottlesAway(false); setStickHeld();
   $('#board').innerHTML = ''; $('#viewBtn').textContent = 'Look at bottles'; $('#trainOver').hidden = true;
   mode = 'quick'; state = 'menu';

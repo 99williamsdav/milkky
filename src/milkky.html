@@ -50,6 +50,14 @@ body{height:100%;background:var(--sky);color:var(--ink);
   -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 #app{position:relative;width:100%;height:100%}
 #app canvas{display:block;width:100%;height:100%;touch-action:none}
+#swipe{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+#swipe path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+#swipe .drag{stroke:#fff;stroke-width:3;opacity:.75}
+#swipe .flick{stroke:#ffc93c;stroke-width:6}
+#swipe .ghost{stroke:#fff;stroke-width:2}
+#swipe .mid{stroke:#fff;stroke-width:1;stroke-dasharray:4 6;opacity:.35}
+#swipe circle{fill:#fff}
+#swipe text{fill:#fff;font:700 15px "Bricolage Grotesque",system-ui,sans-serif;paint-order:stroke;stroke:rgba(20,35,25,.75);stroke-width:4px}
 .hud{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:10px}
 .hud > *{pointer-events:auto}
 #board{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;pointer-events:none}
@@ -323,6 +331,7 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 </head>
 <body>
 <div id="app">
+  <svg id="swipe" aria-hidden="true"></svg>
   <div class="hud">
     <div class="top">
       <div id="board"></div>
