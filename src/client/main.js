@@ -354,7 +354,9 @@ function highlightOf(thrower, fallen, role, hit, needle, before) {
 // Play a recording (slow motion by default) over the scene as it is, then put everything back and carry on (then)
 let replay = null;
 const REPLAY_SLOW = 0.45;
-function playReplay(rec, { label = '', speed = REPLAY_SLOW, then = null } = {}) {
+// angle: where the camera watches from ('normal', the usual camera, or one of REPLAY_ANGLES); step: [n, of] for a
+// sequence of angles (a tap or Skip moves on to the next angle, Skip all ends it: stop)
+function playReplay(rec, { label = '', speed = REPLAY_SLOW, then = null, angle = 'normal', step = null, stop = null } = {}) {
   if (!rec) return then?.();
   const saved = { poses: bottles.map(p => Replay.poseOf(p.body)), vis: bottles.map(p => [p.mesh.visible, p.label.visible]), state, physicsOn,
     ring: landRing.visible, view: viewBottles, ringAt: landRing.position.clone() };
@@ -367,9 +369,66 @@ function playReplay(rec, { label = '', speed = REPLAY_SLOW, then = null } = {}) 
   physicsOn = false; aimLine.visible = false; landRing.visible = false; landed = false; viewBottles = false; dragging = false;
   scene.add(stickMesh); stickMesh.visible = true;
   state = 'replay'; flyTime = 0;
-  replay = { rec, t: 0, speed, saved, then, label };
-  $('#replayLabel').textContent = `${speed < 1 ? 'Slow motion' : 'Replay'}${label ? ` · ${label}` : ''}`;
+  replay = { rec, t: 0, speed, saved, then, label, angle, stop, focus: shotFocus(rec) };
+  const what = REPLAY_ANGLES[angle]?.name || (speed < 1 ? 'Slow motion' : 'Replay');
+  $('#replayLabel').textContent = `${what}${label ? ` · ${label}` : ''}${step ? ` (${step[0]}/${step[1]})` : ''}`;
+  $('#replayAll').hidden = !stop;
   $('#replayBar').hidden = false;
+}
+// Where the action was: the middle of the bottles the throw moved, or where the stick ended up if it moved none
+function shotFocus(rec) {
+  const stick = physics.active, moved = rec.bodies.filter(b => b !== stick && rec.before[b]);
+  if (moved.length) {
+    const c = V(0, 0, 0);
+    for (const b of moved) { c.x += rec.before[b][0]; c.z += rec.before[b][2]; }
+    return c.multiplyScalar(1 / moved.length);
+  }
+  const j = rec.bodies.indexOf(stick), f = rec.frames[rec.frames.length - 1];
+  return j < 0 ? HOME_C.clone() : V(f[j * 7], 0, f[j * 7 + 2]);
+}
+// The other camera angles for a replay: where the camera is and what it looks at, given the shot's focus (f), the
+// throw's direction along the ground (d, from the thrower to the focus), its sideways (s), the stick (k), how far
+// through the replay (u, 0 to 1), and the point to look at (look: the stick in flight, the bottles once it gets there)
+const FROM = V(RELEASE.x, 0, RELEASE.z); // where throws start, on the ground
+const smooth = (a, b, x) => { const k = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
+const REPLAY_ANGLES = {
+  // Side on, level with the throw: tracks along beside the stick, then settles opposite the bottles
+  side: { name: 'Side on', cam: (f, d, s, k, u, look) => {
+    const along = THREE.MathUtils.clamp(k.clone().sub(FROM).dot(d), 0.5, f.clone().sub(FROM).dot(d));
+    const at = FROM.clone().addScaledVector(d, along).addScaledVector(d, -0.4);
+    return [at.addScaledVector(s, 2.7).setY(0.55), look];
+  } },
+  // From among the bottles: low down behind them, the stick coming straight at you
+  bottles: { name: 'From the bottles', cam: (f, d, s, k, u, look) =>
+    [f.clone().addScaledVector(d, 2.1).addScaledVector(s, 0.45).setY(0.3), look] },
+  // A slow sweep round the bottles, closing in as they fall
+  cinematic: { name: 'Cinematic', cam: (f, d, s, k, u, look) => {
+    const a = -1.2 + 2.6 * smooth(0, 1, u), r = 4 - 1.6 * smooth(0, 0.8, u);
+    return [f.clone().addScaledVector(d, -Math.cos(a) * r).addScaledVector(s, Math.sin(a) * r).setY(1.5 - 1 * smooth(0, 0.9, u)), look];
+  } },
+};
+function replayCamera() {
+  const { focus: f, angle, rec, t } = replay;
+  const d = f.clone().sub(FROM).setY(0).normalize(), s = V(-d.z, 0, d.x), k = stickMesh.position.clone();
+  const u = Math.min(1, t / Math.max(0.1, Replay.recordingLength(rec)));
+  // Follow the stick until it's nearly there, then the bottles (and stay on them, however the stick bounces about)
+  replay.there = Math.max(replay.there || 0, 1 - smooth(0.4, 2.5, f.clone().sub(k).dot(d)));
+  const look = k.clone().setY(Math.max(0.1, k.y)).lerp(f.clone().setY(0.15), replay.there);
+  const [pos, at] = REPLAY_ANGLES[angle].cam(f, d, s, k, u, look);
+  camPos.copy(pos); camLook.copy(at);
+  camera.position.copy(camPos); camera.lookAt(camLook);
+}
+// Play a shot from several angles one after another: as it was, side on, from the bottles, then a cinematic sweep
+const REPLAY_SEQUENCE = [['normal', 1], ['side', REPLAY_SLOW], ['bottles', REPLAY_SLOW], ['cinematic', 0.35]];
+function playReplaySequence(rec, { label = '', then = null } = {}) {
+  let stopped = false;
+  const stop = () => { stopped = true; };
+  const play = i => {
+    if (stopped || i >= REPLAY_SEQUENCE.length) return then?.();
+    const [angle, speed] = REPLAY_SEQUENCE[i];
+    playReplay(rec, { label, speed, angle, step: [i + 1, REPLAY_SEQUENCE.length], stop, then: () => play(i + 1) });
+  };
+  play(0);
 }
 function stepReplay(dt) {
   replay.t += dt * replay.speed; flyTime = replay.t;
@@ -392,6 +451,7 @@ function endReplay() {
   if (then) then(); else setStickHeld();
 }
 $('#replaySkip').onclick = () => { if (replay) endReplay(); };
+$('#replayAll').onclick = () => { if (replay) { replay.stop?.(); endReplay(); } };
 $('#replaySave').onclick = () => {
   if (!replay) return;
   const ok = Replay.saveShot(replay.rec, { label: replay.label || replay.rec.meta?.caption || 'A shot', who: replay.rec.meta?.who || '' });
@@ -440,7 +500,7 @@ $('#shotsList').addEventListener('click', e => {
   $('#shots').hidden = true;
   game.battle = game.shake = null;
   useBottlesFor(shot.rec.variant, shot.rec.players); // (the bottles that shot was played with)
-  playReplay(shot.rec, { label: shot.label, then: () => { useBottlesFor('classic'); state = 'menu'; setStickHeld(); openShots(); } });
+  playReplaySequence(shot.rec, { label: shot.label, then: () => { useBottlesFor('classic'); state = 'menu'; setStickHeld(); openShots(); } });
 });
 refreshShotsBtn();
 
@@ -460,7 +520,7 @@ function watchShared() {
   ['#setup', '#sharedShot'].forEach(sel => $(sel).hidden = true);
   game.battle = game.shake = null;
   useBottlesFor(s.rec.variant, s.rec.players);
-  playReplay(s.rec, { label: s.label, then: () => {
+  playReplaySequence(s.rec, { label: s.label, then: () => {
     useBottlesFor('classic'); state = 'menu'; setStickHeld();
     $('#ssTitle').textContent = s.label;
     $('#ssSub').textContent = `${s.who ? `${s.who}, ` : ''}${new Date(s.when).toLocaleDateString()}${s.rec.variant !== 'classic' ? ` · ${VARIANT_NAME[s.rec.variant]}` : ''}`;
@@ -1687,6 +1747,7 @@ function bottleCentre() {
   return n ? c.multiplyScalar(1 / n) : HOME_C.clone();
 }
 function updateCamera(dt) {
+  if (state === 'replay' && replay && replay.angle !== 'normal') return replayCamera();
   const throwView = ['aim', 'cpu', 'menu', 'remote', 'sent'].includes(state) || ((state === 'flying' || state === 'replay') && flyTime < 0.3);
   const follow = viewBottles || !throwView;
   let tp, tl;
