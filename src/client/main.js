@@ -418,8 +418,9 @@ function replayCamera() {
   camPos.copy(pos); camLook.copy(at);
   camera.position.copy(camPos); camera.lookAt(camLook);
 }
-// Play a shot from several angles one after another: as it was, side on, from the bottles, then a cinematic sweep
-const REPLAY_SEQUENCE = [['normal', 1], ['side', REPLAY_SLOW], ['bottles', REPLAY_SLOW], ['cinematic', 0.35]];
+// Play a shot from several angles one after another: as it was, the same in slow motion, side on, from the bottles,
+// then a cinematic sweep
+const REPLAY_SEQUENCE = [['normal', 1], ['normal', REPLAY_SLOW], ['side', REPLAY_SLOW], ['bottles', REPLAY_SLOW], ['cinematic', 0.35]];
 function playReplaySequence(rec, { label = '', then = null } = {}) {
   let stopped = false;
   const stop = () => { stopped = true; };
