@@ -367,13 +367,22 @@ function playReplay(rec, { label = '', speed = REPLAY_SLOW, then = null, angle =
   const out = new Set(rec.hidden);
   bottles.forEach((p, i) => { const on = i < rec.before.length && !out.has(p.num); p.mesh.visible = on; p.label.visible = on && !p.flavour; });
   physicsOn = false; aimLine.visible = false; landRing.visible = false; landed = false; viewBottles = false; dragging = false;
-  scene.add(stickMesh); stickMesh.visible = true;
   state = 'replay'; flyTime = 0;
-  replay = { rec, t: 0, speed, saved, then, label, angle, stop, focus: shotFocus(rec) };
+  // A wind-up first (not the real one, which isn't recorded): the stick drawn back in the hand, then the throw
+  const lead = REPLAY_LEAD * Math.max(speed, 0.6);
+  replay = { rec, t: -lead, lead, aim: aimOf(rec), speed, saved, then, label, angle, stop, focus: shotFocus(rec) };
+  setStickHeld(0, replay.aim);
   const what = REPLAY_ANGLES[angle]?.name || (speed < 1 ? 'Slow motion' : 'Replay');
   $('#replayLabel').textContent = `${what}${label ? ` · ${label}` : ''}${step ? ` (${step[0]}/${step[1]})` : ''}`;
   $('#replayAll').hidden = !stop;
   $('#replayBar').hidden = false;
+}
+// The direction a recording's stick was thrown in (as an aim angle)
+function aimOf(rec) {
+  const j = rec.bodies.indexOf(physics.active), fs = rec.frames;
+  if (j < 0 || fs.length < 2) return 0;
+  const a = fs[0], b = fs[Math.min(fs.length - 1, 4)], dx = b[j * 7] - a[j * 7], dz = b[j * 7 + 2] - a[j * 7 + 2];
+  return Math.hypot(dx, dz) < 1e-3 ? 0 : THREE.MathUtils.clamp(Math.atan2(dx, -dz), -AIM_LIMIT, AIM_LIMIT);
 }
 // Where the action was: the middle of the bottles the throw moved, or where the stick ended up if it moved none
 function shotFocus(rec) {
@@ -409,8 +418,8 @@ const REPLAY_ANGLES = {
 };
 function replayCamera() {
   const { focus: f, angle, rec, t } = replay;
-  const d = f.clone().sub(FROM).setY(0).normalize(), s = V(-d.z, 0, d.x), k = stickMesh.position.clone();
-  const u = Math.min(1, t / Math.max(0.1, Replay.recordingLength(rec)));
+  const d = f.clone().sub(FROM).setY(0).normalize(), s = V(-d.z, 0, d.x), k = stickMesh.getWorldPosition(V(0, 0, 0));
+  const u = THREE.MathUtils.clamp(t / Math.max(0.1, Replay.recordingLength(rec)), 0, 1);
   // Follow the stick until it's nearly there, then the bottles (and stay on them, however the stick bounces about)
   replay.there = Math.max(replay.there || 0, 1 - smooth(0.4, 2.5, f.clone().sub(k).dot(d)));
   const look = k.clone().setY(Math.max(0.1, k.y)).lerp(f.clone().setY(0.15), replay.there);
@@ -431,8 +440,16 @@ function playReplaySequence(rec, { label = '', then = null } = {}) {
   };
   play(0);
 }
+// The wind-up before a replay (seconds of the recording's time, at full speed): drawn back, a pause, then forward
+const REPLAY_LEAD = 0.9;
 function stepReplay(dt) {
-  replay.t += dt * replay.speed; flyTime = replay.t;
+  replay.t += dt * replay.speed; flyTime = Math.max(0, replay.t);
+  if (replay.t < 0) {
+    const p = 1 + replay.t / replay.lead;
+    setStickHeld(p < 0.85 ? 0.8 * smooth(0, 0.6, p) : 0.8 - 1.1 * smooth(0.85, 1, p), replay.aim);
+    return;
+  }
+  if (stickMesh.parent !== scene) scene.add(stickMesh);
   const len = Replay.recordingLength(replay.rec);
   playRecording(replay.rec, Math.min(replay.t, len));
   if (replay.t > len + 0.35) endReplay();
