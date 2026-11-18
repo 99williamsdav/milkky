@@ -181,7 +181,8 @@ function replacePerson(c, id) {
 // Move the top 2 of each league up and the bottom 2 down, bring in anyone waiting, and start the next season.
 // remove: people who have left, replaced by bots for the new season.
 // Leaves c.summary saying what happened: { season, champions (ids by league), cup (winner id), moves: [{ id, from, to }],
-//   people: { [id]: { tier, pos (1 = top), newTier, promoted, relegated, inARow, champion, cupWinner, unbeaten } } }
+//   people: { [id]: { tier, pos (1 = top), newTier, promoted, relegated, inARow, champion, cupWinner, unbeaten,
+//     cupRound (the cup round they went out in, from 0, or CUP_ROUNDS.length if they won it) } } }
 export function nextSeason(c, rng = Math.random, { remove = [] } = {}) {
   const order = c.tiers.map((ids, t) => standings(c, t).map(e => e.id));
   const moves = [];
@@ -199,8 +200,8 @@ export function nextSeason(c, rng = Math.random, { remove = [] } = {}) {
     const newTier = tiers.findIndex(ids => ids.includes(id)), promoted = newTier < t;
     const inARow = promoted && c.promotedIn[id] === c.season - 1;
     if (promoted) c.promotedIn[id] = c.season;
-    const e = c.leagues[t].entries.find(e => e.id === id);
-    people[id] = { tier: t, pos: pos + 1, newTier, promoted, relegated: newTier > t, inARow,
+    const e = c.leagues[t].entries.find(e => e.id === id), cs = cupStatus(c, id);
+    people[id] = { cupRound: cs.won ? CUP_ROUNDS.length : cs.out ? cs.out.round : null, tier: t, pos: pos + 1, newTier, promoted, relegated: newTier > t, inARow,
       champion: pos === 0, cupWinner: c.cup.winner === id, unbeaten: e.W === LEAGUE_ROUNDS };
   }));
   c.summary = { season: c.season, champions: order.map(o => o[0]), cup: c.cup.winner, moves, people };

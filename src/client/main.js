@@ -773,7 +773,7 @@ function playLeagueMatch() {
   if (Career.seasonOver(c)) {
     League.nextSeason();
     const sm = c.summary.people[YOU];
-    Stats.recordSeason(careerStats(), sm); League.save();
+    Stats.recordSeason(careerStats(), sm, c.summary.season); League.save();
     if (sm.promoted) Achv.unlock('goingUp');
     if (sm.inARow) Achv.unlock('backToBack');
     renderLeague(); return;
@@ -792,7 +792,7 @@ function finishLeagueMatch() {
     // Underdogs: beating anyone from a league above yours
     if (won && Career.tierOf(c, bot.bot) < tier) Achv.unlock('underdogs');
   }
-  if (careerTally) Stats.recordGame(careerStats(), careerTally, { won, cup: leagueMatch.cup, opp: bot.bot, youOut: me.out, theyOut: bot.out, battle: !!game.battle });
+  if (careerTally) Stats.recordGame(careerStats(), careerTally, { won, cup: leagueMatch.cup, opp: bot.bot, youOut: me.out, theyOut: bot.out, battle: !!game.battle, season: c.season });
   League.record(me.score, bot.score, won); // (saves the career, stats included)
   leagueMatch = null; mode = 'quick'; careerTally = null;
   careerAchievements();
@@ -1888,14 +1888,21 @@ $('#leagueBtn').onclick = openLeague;
 $('#lgPlay').onclick = playLeagueMatch;
 $('#lgMenu').onclick = () => { $('#league').hidden = true; $('#setup').hidden = false; };
 // The Career stats screen, over the screen it was opened from (solo Career Mode's, or an online career's)
-let statsFrom = '#league';
+// Tapping a stat shows it season by season
+let statsFrom = '#league', statsShown = null;
 function showCareerStats(s, season, from, nameOf) {
   const seasons = s ? season - s.since + 1 : 0;
   $('#csSub').textContent = s?.games ? `Your career${s.since > 1 ? ` since season ${s.since}` : ''}: ${s.games} game${s.games > 1 ? 's' : ''} over ${seasons} season${seasons > 1 ? 's' : ''}.` : '';
   $('#csBody').innerHTML = Stats.renderStats(s, nameOf);
-  statsFrom = from;
+  statsFrom = from; statsShown = { s, season, nameOf };
   $(from).hidden = true; $('#careerStats').hidden = false;
 }
+$('#csBody').addEventListener('click', e => {
+  if (!statsShown) return;
+  const { s, season, nameOf } = statsShown, tile = e.target.closest('[data-chart]');
+  if (tile) { $('#csBody').innerHTML = Stats.renderChart(s, tile.dataset.chart, season); $('#careerStats').scrollTop = 0; }
+  else if (e.target.closest('#csAll')) $('#csBody').innerHTML = Stats.renderStats(s, nameOf);
+});
 $('#lgStats').onclick = () => showCareerStats(solo().stats, solo().season, '#league');
 $('#csBack').onclick = () => { $('#careerStats').hidden = true; $(statsFrom).hidden = false; };
 $('#lgReset').onclick = () => { if (confirm('Start a new career from the Sunday League? Your career so far will be lost.')) openNewLeague(); };

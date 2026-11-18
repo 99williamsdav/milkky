@@ -268,6 +268,19 @@ button.primary{background:var(--blue);color:var(--blue-ink);border-color:transpa
 .trstats span{font-size:12px;color:var(--muted)}
 .trstats b{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
 .cstats em{font-style:normal;font-size:12px;color:var(--muted);margin-top:2px}
+/* Career stats: tiles that open a chart, and the charts season by season */
+.trstats .cstile{all:unset;box-sizing:border-box;cursor:pointer;background:rgba(0,0,0,.04);border:1px solid var(--line);border-radius:12px;padding:8px 10px;
+  display:flex;flex-direction:column;color:var(--ink);font:inherit;text-align:left;-webkit-tap-highlight-color:transparent}
+.trstats .cstile:hover{border-color:var(--blue)}
+.trstats .cstile:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.trstats .cstile span{display:flex;justify-content:space-between;gap:6px}
+.trstats .cstile i{font-style:normal;font-weight:800;font-size:16px;line-height:1;color:var(--blue)}
+.worm .cbar{fill:var(--blue)}
+.worm .cbar.now{opacity:.45}
+.worm .cval{fill:var(--ink);font-size:10px;font-weight:700;font-variant-numeric:tabular-nums}
+.worm .cband.b0{fill:rgba(0,0,0,.05)}
+.worm .cband.b1{fill:rgba(0,0,0,.015)}
+.cnote{font-size:13px;margin:0 0 10px}
 .trthrows{display:grid;grid-template-columns:1fr;margin:0 0 16px;font-size:14px;font-variant-numeric:tabular-nums}
 .trthrows div{display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--line)}
 .trthrows span:first-child{color:var(--muted);width:1.4em}

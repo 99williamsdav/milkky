@@ -500,7 +500,7 @@ export class Room {
       if (!seat.pid) return;
       const other = m.seats[1 - i], me = m.game.players[i], them = m.game.players[1 - i];
       Stats.recordGame(this.statsFor(seat.pid), m.tally?.[i] || Stats.newTally(),
-        { won: i === 0 ? aWon : !aWon, cup, opp: other.pid || other.bot, youOut: me.out, theyOut: them.out, battle: !!(m.game.battle || m.game.shake) });
+        { won: i === 0 ? aWon : !aWon, cup, opp: other.pid || other.bot, youOut: me.out, theyOut: them.out, battle: !!(m.game.battle || m.game.shake), season: this.career.season });
     });
     if (this.matches.every(x => x.over)) return this.endStep();
     this.broadcastRoom();
@@ -537,7 +537,7 @@ export class Room {
     if (Career.seasonOver(c)) {
       const gone = this.seats.filter(s => s.left && s.pid);
       Career.nextSeason(c, Math.random, { remove: gone.map(s => s.pid) });
-      for (const [pid, line] of Object.entries(c.summary.people)) Stats.recordSeason(this.statsFor(pid), line);
+      for (const [pid, line] of Object.entries(c.summary.people)) Stats.recordSeason(this.statsFor(pid), line, c.summary.season);
       gone.filter(s => !Career.inCareer(c, s.pid)).forEach(s => this.removeSeat(s));
       for (const s of this.seats) {
         const tier = Career.tierOf(c, s.pid);
