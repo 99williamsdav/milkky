@@ -10,6 +10,7 @@ import { newShake, flavourOfPlayer, leftFor, FLAVOURS, FLAVOUR_NAME } from '../s
 import { app, renderer, canvas, scene, camera } from './scene.js';
 import { decorateBottles, setBottleLook, FLAVOUR_CSS, stickMesh, hand, aimGeo, aimLine, landRing } from './models.js';
 import { clearMilk, updateMilk } from './milk.js';
+import { createPigeons } from './pigeons.js';
 import * as League from './league.js';
 import * as Career from '../shared/career.js';
 import { showMilkKing } from './milkking.js';
@@ -1784,6 +1785,8 @@ function resize() {
 }
 addEventListener('resize', resize); resize();
 
+// Two pigeons beyond the bottles, scared off by anything that comes sliding up to them
+const pigeons = createPigeons(scene), pigeonScarers = [stickMesh, ...bottles.map(p => p.mesh)];
 let last = performance.now(), lastFrameAt = 0;
 const tq = new THREE.Quaternion(), tv = new THREE.Vector3(), IDQ = new THREE.Quaternion();
 function frame(now) {
@@ -1821,6 +1824,7 @@ function frame(now) {
     p.label.position.set(t.x, t.y + 0.15, t.z);
   }
   updateMilk(dt, bottles, state === 'flying' || state === 'scoring' || state === 'replay');
+  pigeons.update(dt, pigeonScarers);
   // Replay your last throw: when it's a throw's start (yours, or watching someone else's)
   const canReplay = !!lastRec && (state === 'aim' || state === 'remote') && mode !== 'training';
   if ($('#replayBtn').hidden === canReplay) $('#replayBtn').hidden = !canReplay;
