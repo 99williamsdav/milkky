@@ -49,6 +49,9 @@ const s1 = playSeason();
 check(s1.league === 7 && s1.cup.join() === '8,8,4,2,1', `season 1: 7 league rounds and cup rounds of ${s1.cup.join(', ')} ties`);
 check(c.leagues.every(lg => lg.entries.every(e => e.P === 7)), 'everyone played 7 league games');
 check(!!c.cup.winner && all().includes(c.cup.winner), `the cup has a winner (${c.cup.winner})`);
+const inTier = (t, id) => c.tiers[t].includes(id);
+check(c.cup.ties[0].every(t => (inTier(1, t.a) && inTier(2, t.b)) || (inTier(2, t.a) && inTier(1, t.b))), 'the cup\'s first round is seeded: each tie is the Championship against the Sunday League');
+check(c.cup.ties[1].every(t => inTier(0, t.a) !== inTier(0, t.b)), 'and the second: each Premier League side against a first-round winner');
 const people1 = people.map(p => C.cupStatus(c, p));
 check(people1.every(s => s.won || s.out), 'each person either won the cup or knows who knocked them out');
 

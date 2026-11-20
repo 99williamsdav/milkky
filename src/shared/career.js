@@ -38,6 +38,13 @@ export function entryFor(id) {
 const fresh = id => ({ id, P: 0, W: 0, L: 0, PF: 0, PA: 0 });
 const shuffle = (a, rng) => { for (let i = a.length - 1; i > 0; i--) { const j = (rng() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const draw = (ids, rng) => { const list = shuffle([...ids], rng), ties = []; for (let i = 0; i < list.length; i += 2) ties.push({ a: list[i], b: list[i + 1] }); return ties; };
+// A seeded draw: each of the seeds against one of the others (who's a or b is a coin toss); an open draw if the two
+// groups aren't the same size
+function seeded(seeds, others, rng) {
+  if (seeds.length !== others.length) return draw([...seeds, ...others], rng);
+  const s = shuffle([...seeds], rng), o = shuffle([...others], rng);
+  return s.map((id, i) => (rng() < 0.5 ? { a: id, b: o[i] } : { a: o[i], b: id }));
+}
 
 // ---------- Starting out ----------
 // people: person ids. target: what each game is played to (20, 30 or 50).
@@ -70,8 +77,9 @@ function startSeason(c, rng) {
   c.step = 0; c.round = 0; c.lastLeague = null;
   // People's games against each other come as late in the season as possible
   c.leagues = c.tiers.map(ids => ({ entries: ids.map(fresh), schedule: peopleLast(ids.map(isPerson), roundRobin(ids.length), 300, rng) }));
-  // The cup: the 16 outside the Premier League play a first round, the Premier League joins in the second
-  c.cup = { round: 0, ties: [draw(c.tiers.slice(1).flat(), rng)], byes: [...c.tiers[0]], winner: null };
+  // The cup: the 16 outside the Premier League play a first round, seeded (the Championship against the Sunday
+  // League), and the Premier League joins in the second (each against a first-round winner)
+  c.cup = { round: 0, ties: [seeded(c.tiers[1], c.tiers[2], rng)], byes: [...c.tiers[0]], winner: null };
 }
 
 // ---------- Where things stand ----------
@@ -158,7 +166,7 @@ export function playStep(c, results = {}, rng = Math.random) {
     const through = ties.map(t => t.w);
     cup.round++;
     if (cup.round === CUP_ROUNDS.length) cup.winner = through[0];
-    else cup.ties.push(draw(cup.round === 1 ? [...through, ...cup.byes] : through, rng));
+    else cup.ties.push(cup.round === 1 ? seeded(cup.byes, through, rng) : draw(through, rng));
   }
   c.step++;
   return games;
