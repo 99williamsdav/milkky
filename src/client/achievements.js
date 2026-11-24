@@ -23,6 +23,8 @@ export const ACHIEVEMENTS = [
   { id: 'butterfingers', group: 'Funny ones', name: 'Butterfingers', desc: 'Go out with three misses in a row' },
   { id: 'yoyo', group: 'Funny ones', name: 'Yo-Yo', desc: 'Go over the target three times in one game' },
   { id: 'soClose', group: 'Funny ones', name: 'So Close', desc: 'Lose a game when you needed just 1 point' },
+  { id: 'soLonely', group: 'Funny ones', name: 'So Lonely', desc: 'Knock a bottle more than 1.2 m away from all the others' },
+  { id: 'lonelyNoMore', group: 'Throwing', name: 'Lonely No More', desc: 'Hit a bottle standing more than 1.2 m away from all the others' },
   { id: 'jammyDodger', group: 'Funny ones', name: 'Jammy Dodger', desc: 'Finish a game on 0 points' },
   { id: 'spiltMilk', group: 'Throwing', name: 'Spilt Milk', desc: 'Knock over 40 bottles in a single game' },
   { id: 'goingUp', group: 'Career', name: 'Going Up', desc: 'Win your first promotion' },
@@ -65,13 +67,23 @@ export function gameStarted(mine, { midway = false } = {}) {
 
 const FRONT = [1, 2, 3, 10, 4], BACK = [7, 8, 9];
 const NEEDLE_GAP = 0.12; // metres between the two bottles' sides: about two sticks' width
+const LONELY = 1.2;       // metres to the nearest other bottle (knocking one this far: about 1 throw in 300, playing like the bots)
 const SPILT_MILK = 40;    // bottles in one game: a long one (about 1 game in 50 to 50, playing like the bots)
 // A throw has been played and scored. t: {
 //   who: thrower's index, fallen: bottle numbers, hit: { num, top } | null (the stick's first touch),
-//   before: { [num]: { x, z } } bottle positions before the throw, release: { x, z } where it's thrown from,
+//   before: { [num]: { x, z } } bottle positions before the throw, after: the same once it's over (where they lie),
+//   release: { x, z } where it's thrown from,
 //   needle: { a, b, gap } | null (the narrowest gap between standing bottles the stick passed through untouched),
 //   target, players: [{ score, misses, out }] after the throw, scoreBefore, missesBefore (the thrower's),
 //   winner: index or -1, over: the game has ended }
+// How far a bottle is from the nearest other one (places: { [num]: { x, z } }; only bottles 1 to 12 are in play)
+function alone(places, num) {
+  const me = places?.[num];
+  if (!me) return 0;
+  let d = Infinity;
+  for (const [n, o] of Object.entries(places)) if (+n !== num && +n <= 12) d = Math.min(d, Math.hypot(o.x - me.x, o.z - me.z));
+  return d;
+}
 export function thrown(t) {
   if (!match || !match.players[t.who]) return;
   const p = match.players[t.who], f = t.fallen, single = f.length === 1 ? f[0] : null;
@@ -99,6 +111,8 @@ export function thrown(t) {
     if (p.overs >= 3) unlock('yoyo');
     if (t.hit && !f.length) unlock('glancingBlow');
     if (t.needle && t.needle.gap < NEEDLE_GAP && !f.length) unlock('eyeOfNeedle');
+    if (f.some(n => alone(t.after, n) > LONELY)) unlock('soLonely');
+    if (t.hit && alone(t.before, t.hit.num) > LONELY) unlock('lonelyNoMore');
     if (t.players[t.who].out) unlock('butterfingers');
   }
   if (!t.over) return;

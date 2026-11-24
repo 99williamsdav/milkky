@@ -588,7 +588,7 @@ function resolveThrow() {
   game.log.push([thrower, game.players[thrower].score, fallen.length ? 0 : 1]); // for the worm
   if (game.battle || game.shake) { toast(msg, 2200); renderBoard(); state = 'scoring'; phaseT = 0; return; } // (no classic stats or achievements)
   if (mode === 'league' && careerTally && thrower === 0) Stats.recordThrow(careerTally, fallen.map(p => p.num), scoreBefore, game.target);
-  Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, needle: physics.needle, before: throwFrom || {}, release: RELEASE,
+  Achv.thrown({ who: thrower, fallen: fallen.map(p => p.num), hit: physics.firstHit, needle: physics.needle, before: throwFrom || {}, after: bottlePlaces(), release: RELEASE,
     target: game.target, players: game.players, scoreBefore, missesBefore,
     winner: game.winner ? game.players.indexOf(game.winner) : -1, over: isGameOver(game) });
   toast(msg, 2200); renderBoard();
@@ -1354,7 +1354,7 @@ function resolveOnlineThrow() {
   if (game.battle && legBefore === 0 && game.battle.leg === 1) online.newLeg = true; // announced once the rack is reset
   if (online.view === 'game' && !game.battle && !game.shake) { // our own game (not one we're watching); achievements are for the classic game
     const f = online.throwFrom;
-    Achv.thrown({ who: m.seat, fallen: m.fallen, hit: m.hit, needle: m.needle, before: f.before, release: RELEASE, target: game.target,
+    Achv.thrown({ who: m.seat, fallen: m.fallen, hit: m.hit, needle: m.needle, before: f.before, after: bottlePlaces(), release: RELEASE, target: game.target,
       players: game.players, scoreBefore: f.scoreBefore, missesBefore: f.missesBefore, winner: m.game.winner, over: m.over });
     if (m.over && game.players.some((p, i) => !p.cpu && !isMe(i))) Achv.unlock('goodCompany');
   }
