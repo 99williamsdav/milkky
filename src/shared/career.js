@@ -10,7 +10,7 @@
 // step with playStep(), passing the results of the games people played. When the season is over (seasonOver()),
 // nextSeason() moves everyone up and down and starts the next one.
 import { aiFromSkill, simulateGame, simulateBattle, simulateShake } from './ai.js';
-import { roundRobin, peopleLast } from './schedule.js';
+import { randomSchedule } from './schedule.js';
 import { ROSTER, botById, startingTiers, TIERS } from './roster.js';
 
 export const SIZE = 8, UP = 2, DOWN = 2; // per league; promoted and relegated each season
@@ -75,8 +75,8 @@ export const inCareer = (c, id) => c.tiers.some(ids => ids.includes(id));
 
 function startSeason(c, rng) {
   c.step = 0; c.round = 0; c.lastLeague = null;
-  // People's games against each other come as late in the season as possible
-  c.leagues = c.tiers.map(ids => ({ entries: ids.map(fresh), schedule: peopleLast(ids.map(isPerson), roundRobin(ids.length), 300, rng) }));
+  // A random order of fixtures each season (people can meet each other in any round)
+  c.leagues = c.tiers.map(ids => ({ entries: ids.map(fresh), schedule: randomSchedule(ids.length, rng) }));
   // The cup: the 16 outside the Premier League play a first round, seeded (the Championship against the Sunday
   // League), and the Premier League joins in the second (each against a first-round winner)
   c.cup = { round: 0, ties: [seeded(c.tiers[1], c.tiers[2], rng)], byes: [...c.tiers[0]], winner: null };

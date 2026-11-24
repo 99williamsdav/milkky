@@ -60,7 +60,7 @@ check(C.tierOf(first.state, aId) === 2 && C.tierOf(first.state, bId) === 2 && fi
 check(first.people[aId]?.name === 'Alice' && first.people[bId]?.name === 'Bob', 'the career says who the people are');
 await waitFor(() => seen.starts.length >= 2, 'their first games');
 const firstGames = seen.starts.slice(0, 2);
-check(firstGames.every(s => s.players.length === 2 && s.players.some(n => / \(bot\)$/.test(n))), `their first games are against bots (${firstGames.map(s => s.players.join(' v ')).join('; ')})`);
+check(firstGames.every(s => s.players.length === 2), `their first games have started (${firstGames.map(s => s.players.join(' v ')).join('; ')})`);
 
 // ---------- Someone joins partway through ----------
 await waitFor(() => career()?.state.step >= 3, 'a few steps');
@@ -95,8 +95,9 @@ const end = await waitFor(() => seen.rooms.find(r => r.career.state.season === 1
 const s1 = end.career.state;
 check(s1.leagues.every(lg => lg.entries.every(e => e.P === 7)), 'everyone played 7 league games');
 check(!!s1.cup.winner, `the cup was won (by ${s1.cup.winner})`);
-const pvp = s1.lastLeague.games.find(g => [g.a, g.b].sort().join() === [aId, bId].sort().join());
-check(!!pvp, 'Alice and Bob played each other in the last league round');
+const sun = s1.leagues[2], sunIds = sun.entries.map(e => e.id);
+const meet = sun.schedule.findIndex(r => r.some(([x, y]) => [sunIds[x], sunIds[y]].sort().join() === [aId, bId].sort().join()));
+check(meet >= 0, `Alice and Bob played each other in the league (round ${meet + 1})`);
 check(end.phase === 'between' && end.career.nextStepIn > 0, 'a break before the next season');
 
 const s2 = await waitFor(() => seen.rooms.find(r => r.career.state.season === 2)?.career, 'season 2');

@@ -37,6 +37,9 @@ function randomRounds(n, rng) {
   return build(0) ? rounds : null;
 }
 
+// A random full set of rounds for n entries (people can meet in any round)
+export const randomSchedule = (n, rng = Math.random) => randomRounds(n, rng) || roundRobin(n);
+
 // The fixtures arranged so games between people (isPerson[i]) come as late as possible: the earliest such
 // game as late as it can be, then the rest. Any full set of rounds will do, in any order, so this tries
 // many and keeps the best. Pairs are [home, away].

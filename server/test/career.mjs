@@ -24,7 +24,11 @@ check(new Set(all()).size === 24, '24 different players');
 // People's games against each other come in the last rounds (3 people: 3 such games, in rounds 5 to 7)
 const sched = c.leagues[2].schedule, ids = c.leagues[2].entries.map(e => e.id);
 const pvpRounds = sched.flatMap((r, i) => r.filter(([a, b]) => C.isPerson(ids[a]) && C.isPerson(ids[b])).map(() => i + 1));
-check(pvpRounds.length === 3 && Math.min(...pvpRounds) >= 5, `people play each other last (rounds ${pvpRounds.join(', ')})`);
+check(pvpRounds.length === 3, `people play each other once each, in any round (rounds ${pvpRounds.join(', ')})`);
+// Over many seasons' draws, people meet each other in early rounds as well as late ones
+const early = Array.from({ length: 40 }, () => { const d = C.newCareer({ people, rng }), lg = d.leagues[2], id = lg.entries.map(e => e.id);
+  return lg.schedule.findIndex(r => r.some(([a, b]) => C.isPerson(id[a]) && C.isPerson(id[b]))); });
+check(early.some(r => r <= 1), `people can meet in the first rounds (earliest meeting in 40 draws: round ${Math.min(...early) + 1})`);
 
 // A season: people "play" their games (results passed in), everything else is simulated
 function playSeason() {
